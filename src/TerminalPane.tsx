@@ -1,5 +1,6 @@
-import { Columns2, Grid2X2, Maximize2, Plus, RotateCcw, Square, X } from "lucide-react";
+import { Grid2X2, Plus, RotateCcw, Square, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import {
   TerminalSessionView,
   type TerminalSessionHandle,
@@ -25,18 +26,21 @@ interface TerminalTabsState {
   activeTabId: string;
 }
 
-type TerminalLayoutMode = "single" | "split" | "grid";
+type TerminalLayoutMode = "1x1" | "1x2" | "2x2" | "2x3" | "3x3";
 
 const terminalLayoutModes: Array<{
   mode: TerminalLayoutMode;
   label: string;
   title: string;
+  rows: number;
+  columns: number;
   visibleCount: number;
-  icon: typeof Maximize2;
 }> = [
-  { mode: "single", label: "单窗", title: "单窗口布局", visibleCount: 1, icon: Maximize2 },
-  { mode: "split", label: "双列", title: "左右双窗口布局", visibleCount: 2, icon: Columns2 },
-  { mode: "grid", label: "2x2", title: "2x2 四窗口布局", visibleCount: 4, icon: Grid2X2 },
+  { mode: "1x1", label: "1x1", title: "1 行 1 列", rows: 1, columns: 1, visibleCount: 1 },
+  { mode: "1x2", label: "1x2", title: "1 行 2 列", rows: 1, columns: 2, visibleCount: 2 },
+  { mode: "2x2", label: "2x2", title: "2 行 2 列", rows: 2, columns: 2, visibleCount: 4 },
+  { mode: "2x3", label: "2x3", title: "2 行 3 列", rows: 2, columns: 3, visibleCount: 6 },
+  { mode: "3x3", label: "3x3", title: "3 行 3 列", rows: 3, columns: 3, visibleCount: 9 },
 ];
 
 function createTerminalTab(index: number): TerminalTab {
@@ -73,7 +77,7 @@ export function TerminalPane({
   const lastRoutedCommandIdRef = useRef<number | null>(null);
   const previousProjectIdRef = useRef(activeProjectId);
   const [terminalTabs, setTerminalTabs] = useState<TerminalTabsState>(createInitialTabs);
-  const [layoutMode, setLayoutMode] = useState<TerminalLayoutMode>("single");
+  const [layoutMode, setLayoutMode] = useState<TerminalLayoutMode>("1x1");
   const [tabRuntime, setTabRuntime] = useState<Record<string, TerminalSessionRuntime>>({});
   const [routedCommand, setRoutedCommand] = useState<{
     tabId: string;
@@ -278,7 +282,6 @@ export function TerminalPane({
         <div className="terminal-actions">
           <div className="terminal-layout-switch" aria-label="终端布局">
             {terminalLayoutModes.map((layout) => {
-              const Icon = layout.icon;
               return (
                 <button
                   key={layout.mode}
@@ -286,7 +289,7 @@ export function TerminalPane({
                   title={layout.title}
                   onClick={() => changeLayoutMode(layout.mode)}
                 >
-                  <Icon size={14} />
+                  <Grid2X2 size={13} />
                   <span>{layout.label}</span>
                 </button>
               );
@@ -313,7 +316,13 @@ export function TerminalPane({
         </div>
       </header>
 
-      <div className={`terminal-surface layout-${layoutMode}`}>
+      <div
+        className="terminal-surface"
+        style={{
+          "--terminal-grid-columns": activeLayout.columns,
+          "--terminal-grid-rows": activeLayout.rows,
+        } as CSSProperties}
+      >
         {terminalTabs.tabs.map((tab) => (
           <div
             className={`terminal-cell ${tab.id === terminalTabs.activeTabId ? "active" : ""} ${
