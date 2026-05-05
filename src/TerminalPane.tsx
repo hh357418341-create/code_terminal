@@ -1,5 +1,5 @@
-import { Plus, RotateCcw, Square, X } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Columns2, Grid2X2, Maximize2, Plus, RotateCcw, Square, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   TerminalSessionView,
   type TerminalSessionHandle,
@@ -24,6 +24,20 @@ interface TerminalTabsState {
   tabs: TerminalTab[];
   activeTabId: string;
 }
+
+type TerminalLayoutMode = "single" | "split" | "grid";
+
+const terminalLayoutModes: Array<{
+  mode: TerminalLayoutMode;
+  label: string;
+  title: string;
+  visibleCount: number;
+  icon: typeof Maximize2;
+}> = [
+  { mode: "single", label: "单窗", title: "单窗口布局", visibleCount: 1, icon: Maximize2 },
+  { mode: "split", label: "双列", title: "左右双窗口布局", visibleCount: 2, icon: Columns2 },
+  { mode: "grid", label: "2x2", title: "2x2 四窗口布局", visibleCount: 4, icon: Grid2X2 },
+];
 
 function createTerminalTab(index: number): TerminalTab {
   const id =
@@ -59,6 +73,7 @@ export function TerminalPane({
   const lastRoutedCommandIdRef = useRef<number | null>(null);
   const previousProjectIdRef = useRef(activeProjectId);
   const [terminalTabs, setTerminalTabs] = useState<TerminalTabsState>(createInitialTabs);
+  const [layoutMode, setLayoutMode] = useState<TerminalLayoutMode>("single");
   const [tabRuntime, setTabRuntime] = useState<Record<string, TerminalSessionRuntime>>({});
   const [routedCommand, setRoutedCommand] = useState<{
     tabId: string;
@@ -67,6 +82,16 @@ export function TerminalPane({
 
   const activeRuntime = tabRuntime[terminalTabs.activeTabId];
   const activeCwd = activeRuntime?.session?.cwd || activeProjectPath || "未绑定项目目录";
+  const activeLayout = terminalLayoutModes.find((layout) => layout.mode === layoutMode) ?? terminalLayoutModes[0];
+  const visibleTabs = useMemo(() => {
+    const activeIndex = terminalTabs.tabs.findIndex((tab) => tab.id === terminalTabs.activeTabId);
+    if (activeIndex < 0) return terminalTabs.tabs.slice(0, activeLayout.visibleCount);
+
+    const pageStart =
+      Math.floor(activeIndex / activeLayout.visibleCount) * activeLayout.visibleCount;
+    return terminalTabs.tabs.slice(pageStart, pageStart + activeLayout.visibleCount);
+  }, [activeLayout.visibleCount, terminalTabs.activeTabId, terminalTabs.tabs]);
+  const visibleTabIds = useMemo(() => new Set(visibleTabs.map((tab) => tab.id)), [visibleTabs]);
 
   const updateRuntime = useCallback((tabId: string, runtime: TerminalSessionRuntime) => {
     setTabRuntime((current) => ({
@@ -106,6 +131,12 @@ export function TerminalPane({
     });
   }, [terminalTabs.activeTabId, terminalTabs.tabs.length]);
 
+  useEffect(() => {
+    window.setTimeout(() => {
+      visibleTabs.forEach((tab) => terminalHandlesRef.current[tab.id]?.fit());
+    }, 0);
+  }, [layoutMode, visibleTabs]);
+
   function addTerminalTab() {
     const tab = createTerminalTab(nextTabIndexRef.current);
     nextTabIndexRef.current += 1;
@@ -114,6 +145,31 @@ export function TerminalPane({
       tabs: [...current.tabs, tab],
       activeTabId: tab.id,
     }));
+  }
+
+  function ensureLayoutTerminals(mode: TerminalLayoutMode) {
+    const layout = terminalLayoutModes.find((item) => item.mode === mode) ?? terminalLayoutModes[0];
+
+    setTerminalTabs((current) => {
+      if (current.tabs.length >= layout.visibleCount) return current;
+
+      const tabs = [...current.tabs];
+      while (tabs.length < layout.visibleCount) {
+        tabs.push(createTerminalTab(nextTabIndexRef.current));
+        nextTabIndexRef.current += 1;
+      }
+
+      return {
+        ...current,
+        tabs,
+      };
+    });
+  }
+
+  function changeLayoutMode(mode: TerminalLayoutMode) {
+    setLayoutMode(mode);
+    ensureLayoutTerminals(mode);
+    window.setTimeout(() => terminalHandlesRef.current[terminalTabs.activeTabId]?.focus(), 0);
   }
 
   function closeTerminalTab(tabId: string) {
@@ -220,6 +276,22 @@ export function TerminalPane({
         </div>
 
         <div className="terminal-actions">
+          <div className="terminal-layout-switch" aria-label="终端布局">
+            {terminalLayoutModes.map((layout) => {
+              const Icon = layout.icon;
+              return (
+                <button
+                  key={layout.mode}
+                  className={`terminal-layout-button ${layoutMode === layout.mode ? "active" : ""}`}
+                  title={layout.title}
+                  onClick={() => changeLayoutMode(layout.mode)}
+                >
+                  <Icon size={14} />
+                  <span>{layout.label}</span>
+                </button>
+              );
+            })}
+          </div>
           <button
             className="terminal-action"
             title="重启当前终端"
@@ -241,25 +313,37 @@ export function TerminalPane({
         </div>
       </header>
 
-      <div className="terminal-surface">
+      <div className={`terminal-surface layout-${layoutMode}`}>
         {terminalTabs.tabs.map((tab) => (
-          <TerminalSessionView
+          <div
+            className={`terminal-cell ${tab.id === terminalTabs.activeTabId ? "active" : ""} ${
+              visibleTabIds.has(tab.id) ? "visible" : ""
+            }`}
             key={tab.id}
-            ref={(handle) => {
-              if (handle) {
-                terminalHandlesRef.current[tab.id] = handle;
-              } else {
-                delete terminalHandlesRef.current[tab.id];
-              }
-            }}
-            tabId={tab.id}
-            isActive={tab.id === terminalTabs.activeTabId}
-            activeProjectId={activeProjectId}
-            appearance={appearance}
-            commandRequest={routedCommand?.tabId === tab.id ? routedCommand.request : null}
-            onError={onError}
-            onRuntimeChange={updateRuntime}
-          />
+            onMouseDown={() => focusTerminal(tab.id)}
+          >
+            <div className="terminal-cell-header">
+              <span>{tab.title}</span>
+              <span>{tabRuntime[tab.id]?.session?.cwd || activeProjectPath || "未绑定项目目录"}</span>
+            </div>
+            <TerminalSessionView
+              ref={(handle) => {
+                if (handle) {
+                  terminalHandlesRef.current[tab.id] = handle;
+                } else {
+                  delete terminalHandlesRef.current[tab.id];
+                }
+              }}
+              tabId={tab.id}
+              isActive={tab.id === terminalTabs.activeTabId}
+              isVisible={visibleTabIds.has(tab.id)}
+              activeProjectId={activeProjectId}
+              appearance={appearance}
+              commandRequest={routedCommand?.tabId === tab.id ? routedCommand.request : null}
+              onError={onError}
+              onRuntimeChange={updateRuntime}
+            />
+          </div>
         ))}
       </div>
     </section>

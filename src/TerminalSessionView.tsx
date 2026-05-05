@@ -33,6 +33,7 @@ export interface TerminalSessionHandle {
 interface TerminalSessionViewProps {
   tabId: string;
   isActive: boolean;
+  isVisible: boolean;
   activeProjectId?: string | null;
   appearance: TerminalAppearanceSettings;
   commandRequest?: TerminalCommandRequest | null;
@@ -45,6 +46,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     {
       tabId,
       isActive,
+      isVisible,
       activeProjectId,
       appearance,
       commandRequest,
@@ -63,6 +65,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     const resizeSettleTimersRef = useRef<number[]>([]);
     const isStartingRef = useRef(false);
     const isActiveRef = useRef(isActive);
+    const isVisibleRef = useRef(isVisible);
     const pendingCommandRef = useRef<string | null>(null);
     const lastCommandIdRef = useRef<number | null>(null);
     const isLifecycleStoppingRef = useRef(false);
@@ -205,7 +208,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     }
 
     function fitAndResize() {
-      if (!isActiveRef.current) return;
+      if (!isVisibleRef.current) return;
 
       const size = fitTerminal();
       const sessionId = sessionIdRef.current;
@@ -238,7 +241,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     }
 
     function scheduleFitAndResize() {
-      if (!isActiveRef.current) return;
+      if (!isVisibleRef.current) return;
 
       clearScheduledResize();
       resizeTimerRef.current = window.setTimeout(() => {
@@ -268,7 +271,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       terminal.reset();
 
       try {
-        const size = isActiveRef.current ? fitTerminal() ?? { cols: 100, rows: 28 } : { cols: 100, rows: 28 };
+        const size = isVisibleRef.current ? fitTerminal() ?? { cols: 100, rows: 28 } : { cols: 100, rows: 28 };
         const sessionId = crypto.randomUUID();
         startingSessionIdRef.current = sessionId;
         lastResizeRef.current = size;
@@ -331,11 +334,19 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
 
     useEffect(() => {
       isActiveRef.current = isActive;
-      if (!isActive) return;
+
+      if (isActive) {
+        scheduleFitAndResize();
+        terminalRef.current?.focus();
+      }
+    }, [isActive]);
+
+    useEffect(() => {
+      isVisibleRef.current = isVisible;
+      if (!isVisible) return;
 
       scheduleFitAndResize();
-      terminalRef.current?.focus();
-    }, [isActive]);
+    }, [isVisible]);
 
     useEffect(() => {
       const host = hostRef.current;
@@ -432,9 +443,9 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
 
     return (
       <div
-        className={`terminal-host ${isActive ? "active" : ""}`}
+        className={`terminal-host ${isVisible ? "visible" : ""} ${isActive ? "active" : ""}`}
         ref={hostRef}
-        aria-hidden={!isActive}
+        aria-hidden={!isVisible}
       />
     );
   },
