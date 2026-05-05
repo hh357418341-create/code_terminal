@@ -1,6 +1,7 @@
 node_modules
 .opencode-workbench
 src-tauri/target
+src-tauri/target-*
 src-tauri/gen
 *.log
 .DS_Store
