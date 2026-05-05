@@ -1,5 +1,4 @@
 node_modules
-dist
 .opencode-workbench
 src-tauri/target
 src-tauri/gen
