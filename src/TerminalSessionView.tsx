@@ -14,6 +14,7 @@ import type {
 } from "./types";
 
 const outputChunkSize = 4096;
+const outputCursorRevealDelayMs = 2400;
 const resizeDebounceMs = 40;
 const resizeSettleDelays = [80, 180, 360];
 
@@ -70,6 +71,8 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     const isLifecycleStoppingRef = useRef(false);
     const outputQueueRef = useRef<string[]>([]);
     const outputWriterActiveRef = useRef(false);
+    const outputCursorTimerRef = useRef<number | null>(null);
+    const outputCursorSuppressedRef = useRef(false);
     const lastResizeRef = useRef<{ cols: number; rows: number } | null>(null);
     const [session, setSession] = useState<TerminalStarted | null>(null);
     const [isStarting, setIsStarting] = useState(false);
@@ -92,6 +95,48 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     function clearOutputQueue() {
       outputQueueRef.current = [];
       outputWriterActiveRef.current = false;
+      if (outputCursorTimerRef.current) {
+        window.clearTimeout(outputCursorTimerRef.current);
+        outputCursorTimerRef.current = null;
+      }
+      setOutputCursorSuppressed(false);
+    }
+
+    function setOutputCursorSuppressed(suppressed: boolean) {
+      outputCursorSuppressedRef.current = suppressed;
+      hostRef.current?.classList.toggle("terminal-output-streaming", suppressed);
+    }
+
+    function suppressCursorDuringOutput() {
+      if (outputCursorTimerRef.current) {
+        window.clearTimeout(outputCursorTimerRef.current);
+        outputCursorTimerRef.current = null;
+      }
+
+      if (!outputCursorSuppressedRef.current) {
+        setOutputCursorSuppressed(true);
+      }
+    }
+
+    function revealCursorAfterOutputSettles() {
+      if (!outputCursorSuppressedRef.current) return;
+      if (outputCursorTimerRef.current) {
+        window.clearTimeout(outputCursorTimerRef.current);
+      }
+
+      outputCursorTimerRef.current = window.setTimeout(() => {
+        outputCursorTimerRef.current = null;
+        if (outputWriterActiveRef.current || outputQueueRef.current.length > 0) return;
+        setOutputCursorSuppressed(false);
+      }, outputCursorRevealDelayMs);
+    }
+
+    function revealCursorForInput() {
+      if (outputCursorTimerRef.current) {
+        window.clearTimeout(outputCursorTimerRef.current);
+        outputCursorTimerRef.current = null;
+      }
+      setOutputCursorSuppressed(false);
     }
 
     function pumpTerminalOutput() {
@@ -100,6 +145,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
 
       if (!terminal || !next) {
         outputWriterActiveRef.current = false;
+        revealCursorAfterOutputSettles();
         return;
       }
 
@@ -109,6 +155,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     function enqueueTerminalOutput(data: string) {
       if (!data) return;
 
+      suppressCursorDuringOutput();
       for (let index = 0; index < data.length; index += outputChunkSize) {
         outputQueueRef.current.push(data.slice(index, index + outputChunkSize));
       }
@@ -337,6 +384,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       const dataDisposable = terminal.onData((data) => {
         const sessionId = sessionIdRef.current;
         if (!sessionId) return;
+        revealCursorForInput();
         invoke("terminal_write", { sessionId, data }).catch(reportTerminalError);
       });
 

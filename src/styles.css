@@ -729,6 +729,11 @@ button {
   animation: none !important;
 }
 
+.terminal-host.terminal-output-streaming .xterm-cursor {
+  animation: none !important;
+  opacity: 0 !important;
+}
+
 @media (max-width: 1060px) {
   body {
     min-width: 820px;
