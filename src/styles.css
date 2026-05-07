@@ -731,6 +731,11 @@ button {
 
 .terminal-host.terminal-output-streaming .xterm-cursor {
   animation: none !important;
+  background-color: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  color: inherit !important;
+  outline: 0 !important;
   opacity: 0 !important;
 }
 

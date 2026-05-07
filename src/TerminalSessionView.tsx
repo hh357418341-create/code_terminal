@@ -15,6 +15,9 @@ import type {
 
 const outputChunkSize = 4096;
 const outputCursorRevealDelayMs = 2400;
+const terminalCursorHiddenSequence = "\x1b[?12l\x1b[?25l";
+const terminalCursorVisibleSequence = "\x1b[?12l\x1b[?25h";
+const cursorPrivateModeParams = new Set([12, 25]);
 const resizeDebounceMs = 40;
 const resizeSettleDelays = [80, 180, 360];
 
@@ -73,6 +76,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     const outputWriterActiveRef = useRef(false);
     const outputCursorTimerRef = useRef<number | null>(null);
     const outputCursorSuppressedRef = useRef(false);
+    const alternateScreenActiveRef = useRef(false);
     const lastResizeRef = useRef<{ cols: number; rows: number } | null>(null);
     const [session, setSession] = useState<TerminalStarted | null>(null);
     const [isStarting, setIsStarting] = useState(false);
@@ -99,12 +103,47 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         window.clearTimeout(outputCursorTimerRef.current);
         outputCursorTimerRef.current = null;
       }
+      alternateScreenActiveRef.current = false;
+      hostRef.current?.classList.remove("terminal-tui-active");
       setOutputCursorSuppressed(false);
     }
 
     function setOutputCursorSuppressed(suppressed: boolean) {
       outputCursorSuppressedRef.current = suppressed;
+      syncCursorSuppressionClass();
+    }
+
+    function syncCursorSuppressionClass() {
+      const suppressed = outputCursorSuppressedRef.current || alternateScreenActiveRef.current;
       hostRef.current?.classList.toggle("terminal-output-streaming", suppressed);
+    }
+
+    function setAlternateScreenActive(active: boolean) {
+      if (alternateScreenActiveRef.current === active) return;
+
+      alternateScreenActiveRef.current = active;
+      hostRef.current?.classList.toggle("terminal-tui-active", active);
+      syncCursorSuppressionClass();
+
+      if (active) {
+        terminalRef.current?.write(terminalCursorHiddenSequence);
+      } else if (!outputCursorSuppressedRef.current) {
+        terminalRef.current?.write(terminalCursorVisibleSequence);
+      }
+    }
+
+    function shouldGuardCursorControl() {
+      return outputCursorSuppressedRef.current || alternateScreenActiveRef.current;
+    }
+
+    function csiParamsInclude(params: (number | number[])[], values: Set<number>) {
+      return params.some((param) => {
+        if (Array.isArray(param)) {
+          return param.some((subParam) => values.has(subParam));
+        }
+
+        return values.has(param);
+      });
     }
 
     function suppressCursorDuringOutput() {
@@ -128,6 +167,9 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         outputCursorTimerRef.current = null;
         if (outputWriterActiveRef.current || outputQueueRef.current.length > 0) return;
         setOutputCursorSuppressed(false);
+        if (!alternateScreenActiveRef.current) {
+          terminalRef.current?.write(terminalCursorVisibleSequence);
+        }
       }, outputCursorRevealDelayMs);
     }
 
@@ -137,6 +179,9 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         outputCursorTimerRef.current = null;
       }
       setOutputCursorSuppressed(false);
+      if (!alternateScreenActiveRef.current) {
+        terminalRef.current?.write(terminalCursorVisibleSequence);
+      }
     }
 
     function pumpTerminalOutput() {
@@ -149,7 +194,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         return;
       }
 
-      terminal.write(next, pumpTerminalOutput);
+      terminal.write(`${next}${terminalCursorHiddenSequence}`, pumpTerminalOutput);
     }
 
     function enqueueTerminalOutput(data: string) {
@@ -381,6 +426,18 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       fitRef.current = fit;
       scheduleFitAndResize();
 
+      const bufferDisposable = terminal.buffer.onBufferChange((buffer) => {
+        setAlternateScreenActive(buffer.type === "alternate");
+      });
+      const cursorModeDisposable = terminal.parser.registerCsiHandler(
+        { prefix: "?", final: "h" },
+        (params) => shouldGuardCursorControl() && csiParamsInclude(params, cursorPrivateModeParams),
+      );
+      const cursorStyleDisposable = terminal.parser.registerCsiHandler(
+        { intermediates: " ", final: "q" },
+        () => shouldGuardCursorControl(),
+      );
+
       const dataDisposable = terminal.onData((data) => {
         const sessionId = sessionIdRef.current;
         if (!sessionId) return;
@@ -416,6 +473,9 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         window.removeEventListener("resize", scheduleFitAndResize);
         document.removeEventListener("fullscreenchange", scheduleFitAndResize);
         window.visualViewport?.removeEventListener("resize", scheduleFitAndResize);
+        bufferDisposable.dispose();
+        cursorModeDisposable.dispose();
+        cursorStyleDisposable.dispose();
         dataDisposable.dispose();
         unlistenOutput.then((unlisten) => unlisten());
         unlistenExit.then((unlisten) => unlisten());
