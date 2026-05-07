@@ -1,4 +1,4 @@
-import { Grid2X2, Plus, RotateCcw, Square, X } from "lucide-react";
+import { LayoutGrid, Plus, RotateCcw, Square, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import {
@@ -369,7 +369,7 @@ export function TerminalPane({
     <section className="terminal-pane">
       <header className="terminal-bar">
         <div className="terminal-tab-strip">
-          <strong className="terminal-bar-title">本地终端</strong>
+          <strong className="terminal-bar-title">Terminal Tiles</strong>
           <div
             className="terminal-tabs"
             ref={terminalTabsRef}
@@ -440,7 +440,7 @@ export function TerminalPane({
                   title={layout.title}
                   onClick={() => changeLayoutMode(layout.mode)}
                 >
-                  <Grid2X2 size={13} />
+                  <LayoutGrid size={13} />
                   <span>{layout.label}</span>
                 </button>
               );

@@ -71,8 +71,9 @@ button {
   align-items: center;
   gap: 10px;
   min-width: 0;
-  color: #747b84;
-  font-size: 21px;
+  color: #2e3742;
+  font-size: 18px;
+  font-weight: 760;
   line-height: 1.2;
 }
 
@@ -123,12 +124,12 @@ button {
 
 .project-item {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   width: 100%;
   min-height: 52px;
-  padding: 0 18px 0 52px;
+  padding: 0 18px 0 28px;
   color: #353b43;
   text-align: left;
   background: transparent;
@@ -139,15 +140,24 @@ button {
     color 150ms ease;
 }
 
+.project-item-icon {
+  color: #747d88;
+}
+
 .project-item:hover,
 .project-item.active {
   background: #dde2ea;
 }
 
+.project-item.active .project-item-icon {
+  color: #334155;
+}
+
 .project-title {
   min-width: 0;
   overflow: hidden;
-  font-size: 20px;
+  font-size: 16px;
+  font-weight: 650;
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -155,7 +165,7 @@ button {
 
 .project-time {
   color: #8b919a;
-  font-size: 18px;
+  font-size: 13px;
   line-height: 1.2;
   white-space: nowrap;
 }
@@ -220,8 +230,9 @@ button {
   width: 36px;
   height: 36px;
   flex-shrink: 0;
-  color: var(--terminal-bg, #070b10);
-  background: var(--terminal-accent, #8ab4ff);
+  color: var(--terminal-accent, #8ab4ff);
+  background: color-mix(in srgb, var(--terminal-accent, #8ab4ff) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--terminal-accent, #8ab4ff) 36%, transparent);
   border-radius: 8px;
 }
 

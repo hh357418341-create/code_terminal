@@ -1,8 +1,8 @@
 [package]
-name = "opencode-workbench"
+name = "code-terminal"
 version = "0.1.0"
-description = "A small Tauri project terminal workbench"
-authors = ["OpenCode Workbench"]
+description = "A lightweight tiled project terminal"
+authors = ["Code Terminal"]
 edition = "2021"
 
 [lib]

@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Folder, Minus, Palette, Plus, RefreshCw, Terminal, Trash2 } from "lucide-react";
+import { FolderOpen, Minus, Palette, PanelsTopLeft, Plus, RefreshCw, SquareTerminal, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { TerminalPane } from "./TerminalPane";
 import {
@@ -23,6 +23,7 @@ const emptyState: WorkbenchState = {
   projects: [],
   activeProjectId: null,
 };
+const productName = "Code Terminal";
 const appearanceStorageKey = "opencode-workbench.terminal-appearance";
 const colorFields: Array<{ key: TerminalColorKey; label: string }> = [
   { key: "background", label: "背景" },
@@ -145,8 +146,8 @@ export function App() {
       <aside className="sidebar">
         <div className="project-root">
           <div className="project-root-title">
-            <Folder size={22} />
-            <span>{activeProject?.name || ".codex"}</span>
+            <SquareTerminal size={22} />
+            <span>{productName}</span>
           </div>
           <button className="sidebar-icon" title="打开项目" onClick={chooseProject}>
             <Plus size={16} />
@@ -166,6 +167,7 @@ export function App() {
                 title={project.path}
                 onClick={() => setActive(project.id)}
               >
+                <FolderOpen className="project-item-icon" size={15} />
                 <span className="project-title">{project.name}</span>
                 <span className="project-time">{formatRelativeTime(project.lastOpenedAt)}</span>
               </button>
@@ -189,11 +191,11 @@ export function App() {
         <header className="workspace-bar">
           <div className="project-heading">
             <div className="terminal-mark">
-              <Terminal size={18} />
+              <PanelsTopLeft size={18} />
             </div>
             <div>
-              <h2>{activeProject?.name || "Terminal"}</h2>
-              <p>{activeProject?.path || "选择左侧项目后，右侧终端会切到对应目录"}</p>
+              <h2>{activeProject?.name || productName}</h2>
+              <p>{activeProject?.path || "选择项目后，右侧终端会切到对应目录，可按瓦片查看多个任务"}</p>
             </div>
           </div>
 
