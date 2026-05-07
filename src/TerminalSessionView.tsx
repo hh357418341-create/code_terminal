@@ -14,7 +14,6 @@ import type {
 } from "./types";
 
 const outputChunkSize = 4096;
-const cursorRevealDelayMs = 850;
 const resizeDebounceMs = 40;
 const resizeSettleDelays = [80, 180, 360];
 
@@ -71,8 +70,6 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     const isLifecycleStoppingRef = useRef(false);
     const outputQueueRef = useRef<string[]>([]);
     const outputWriterActiveRef = useRef(false);
-    const cursorRevealTimerRef = useRef<number | null>(null);
-    const cursorHiddenDuringOutputRef = useRef(false);
     const lastResizeRef = useRef<{ cols: number; rows: number } | null>(null);
     const [session, setSession] = useState<TerminalStarted | null>(null);
     const [isStarting, setIsStarting] = useState(false);
@@ -92,43 +89,9 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       onError(String(err));
     }
 
-    function setCursorHiddenDuringOutput(hidden: boolean) {
-      cursorHiddenDuringOutputRef.current = hidden;
-      hostRef.current?.classList.toggle("terminal-output-active", hidden);
-    }
-
     function clearOutputQueue() {
       outputQueueRef.current = [];
       outputWriterActiveRef.current = false;
-      if (cursorRevealTimerRef.current) {
-        window.clearTimeout(cursorRevealTimerRef.current);
-        cursorRevealTimerRef.current = null;
-      }
-      setCursorHiddenDuringOutput(false);
-    }
-
-    function hideCursorDuringOutput() {
-      if (cursorRevealTimerRef.current) {
-        window.clearTimeout(cursorRevealTimerRef.current);
-        cursorRevealTimerRef.current = null;
-      }
-      if (!cursorHiddenDuringOutputRef.current) {
-        setCursorHiddenDuringOutput(true);
-      }
-    }
-
-    function scheduleCursorReveal() {
-      if (!cursorHiddenDuringOutputRef.current) return;
-      if (cursorRevealTimerRef.current) {
-        window.clearTimeout(cursorRevealTimerRef.current);
-      }
-
-      cursorRevealTimerRef.current = window.setTimeout(() => {
-        cursorRevealTimerRef.current = null;
-        if (outputWriterActiveRef.current || outputQueueRef.current.length > 0) return;
-
-        setCursorHiddenDuringOutput(false);
-      }, cursorRevealDelayMs);
     }
 
     function pumpTerminalOutput() {
@@ -137,7 +100,6 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
 
       if (!terminal || !next) {
         outputWriterActiveRef.current = false;
-        scheduleCursorReveal();
         return;
       }
 
@@ -147,7 +109,6 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     function enqueueTerminalOutput(data: string) {
       if (!data) return;
 
-      hideCursorDuringOutput();
       for (let index = 0; index < data.length; index += outputChunkSize) {
         outputQueueRef.current.push(data.slice(index, index + outputChunkSize));
       }
@@ -356,7 +317,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         allowProposedApi: false,
         convertEol: false,
         cursorBlink: false,
-        cursorStyle: "bar",
+        cursorStyle: "block",
         fontFamily: '"Cascadia Mono", Consolas, "SFMono-Regular", monospace',
         fontSize: appearance.fontSize,
         lineHeight: 1.25,
