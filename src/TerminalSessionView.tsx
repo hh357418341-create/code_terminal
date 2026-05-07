@@ -14,7 +14,7 @@ import type {
 } from "./types";
 
 const outputChunkSize = 4096;
-const cursorRevealDelayMs = 180;
+const cursorRevealDelayMs = 850;
 const resizeDebounceMs = 40;
 const resizeSettleDelays = [80, 180, 360];
 

@@ -691,7 +691,7 @@ button {
 }
 
 .terminal-host .xterm-cursor.xterm-cursor-blink {
-  animation-duration: 1.6s !important;
+  animation: none !important;
 }
 
 .terminal-host.terminal-output-active .xterm-cursor {
