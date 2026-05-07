@@ -1,6 +1,6 @@
 import { Grid2X2, Plus, RotateCcw, Square, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties } from "react";
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import {
   TerminalSessionView,
   type TerminalSessionHandle,
@@ -27,6 +27,16 @@ interface TerminalTabsState {
 }
 
 type TerminalLayoutMode = "1x1" | "1x2" | "2x2" | "2x3" | "3x3";
+type ResizeAxis = "column" | "row";
+
+interface ResizeDragState {
+  axis: ResizeAxis;
+  index: number;
+  pointerId: number;
+  startClientX: number;
+  startClientY: number;
+  startSizes: number[];
+}
 
 const terminalLayoutModes: Array<{
   mode: TerminalLayoutMode;
@@ -73,6 +83,34 @@ function formatTerminalPath(path?: string | null) {
   return `.../${parts.slice(-3).join("/")}`;
 }
 
+function createEqualWeights(count: number) {
+  return Array.from({ length: Math.max(1, count) }, () => 1);
+}
+
+function formatGridWeights(weights: number[]) {
+  return weights.map((weight) => `minmax(0, ${Math.max(0.2, weight).toFixed(4)}fr)`).join(" ");
+}
+
+function getResizeBoundaryPercent(weights: number[], index: number) {
+  const total = weights.reduce((sum, weight) => sum + weight, 0) || 1;
+  const offset = weights.slice(0, index + 1).reduce((sum, weight) => sum + weight, 0);
+  return (offset / total) * 100;
+}
+
+function resizeAdjacentWeights(startSizes: number[], index: number, delta: number, containerSize: number) {
+  const total = startSizes.reduce((sum, size) => sum + size, 0) || 1;
+  const deltaWeight = (delta / Math.max(1, containerSize)) * total;
+  const minWeight = 0.35;
+  const next = [...startSizes];
+  const pairTotal = startSizes[index] + startSizes[index + 1];
+  const first = Math.min(pairTotal - minWeight, Math.max(minWeight, startSizes[index] + deltaWeight));
+
+  next[index] = first;
+  next[index + 1] = pairTotal - first;
+
+  return next;
+}
+
 export function TerminalPane({
   activeProjectId,
   activeProjectPath,
@@ -84,10 +122,18 @@ export function TerminalPane({
   const terminalHandlesRef = useRef<Record<string, TerminalSessionHandle | undefined>>({});
   const terminalTabsRef = useRef<HTMLDivElement | null>(null);
   const terminalTabElementsRef = useRef<Record<string, HTMLDivElement | null>>({});
+  const terminalSurfaceRef = useRef<HTMLDivElement | null>(null);
+  const terminalFitFrameRef = useRef<number | null>(null);
+  const terminalFitSettleTimersRef = useRef<number[]>([]);
+  const resizeDragRef = useRef<ResizeDragState | null>(null);
   const lastRoutedCommandIdRef = useRef<number | null>(null);
   const previousProjectIdRef = useRef(activeProjectId);
   const [terminalTabs, setTerminalTabs] = useState<TerminalTabsState>(createInitialTabs);
   const [layoutMode, setLayoutMode] = useState<TerminalLayoutMode>("1x1");
+  const activeLayout = terminalLayoutModes.find((layout) => layout.mode === layoutMode) ?? terminalLayoutModes[0];
+  const [columnWeights, setColumnWeights] = useState(() => createEqualWeights(activeLayout.columns));
+  const [rowWeights, setRowWeights] = useState(() => createEqualWeights(activeLayout.rows));
+  const [isResizingLayout, setIsResizingLayout] = useState(false);
   const [tabRuntime, setTabRuntime] = useState<Record<string, TerminalSessionRuntime>>({});
   const [routedCommand, setRoutedCommand] = useState<{
     tabId: string;
@@ -96,7 +142,6 @@ export function TerminalPane({
 
   const activeRuntime = tabRuntime[terminalTabs.activeTabId];
   const activeCwd = activeRuntime?.session?.cwd || activeProjectPath || "未绑定项目目录";
-  const activeLayout = terminalLayoutModes.find((layout) => layout.mode === layoutMode) ?? terminalLayoutModes[0];
   const visibleTabs = useMemo(() => {
     const activeIndex = terminalTabs.tabs.findIndex((tab) => tab.id === terminalTabs.activeTabId);
     if (activeIndex < 0) return terminalTabs.tabs.slice(0, activeLayout.visibleCount);
@@ -106,6 +151,95 @@ export function TerminalPane({
     return terminalTabs.tabs.slice(pageStart, pageStart + activeLayout.visibleCount);
   }, [activeLayout.visibleCount, terminalTabs.activeTabId, terminalTabs.tabs]);
   const visibleTabIds = useMemo(() => new Set(visibleTabs.map((tab) => tab.id)), [visibleTabs]);
+
+  function fitVisibleTerminals() {
+    visibleTabs.forEach((tab) => terminalHandlesRef.current[tab.id]?.fit());
+  }
+
+  function clearTerminalFitTimers() {
+    if (terminalFitFrameRef.current) {
+      window.cancelAnimationFrame(terminalFitFrameRef.current);
+      terminalFitFrameRef.current = null;
+    }
+    terminalFitSettleTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+    terminalFitSettleTimersRef.current = [];
+  }
+
+  function scheduleVisibleTerminalFit(withSettle = false) {
+    if (terminalFitFrameRef.current) {
+      window.cancelAnimationFrame(terminalFitFrameRef.current);
+    }
+
+    terminalFitFrameRef.current = window.requestAnimationFrame(() => {
+      terminalFitFrameRef.current = null;
+      fitVisibleTerminals();
+    });
+
+    if (!withSettle) return;
+
+    terminalFitSettleTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+    terminalFitSettleTimersRef.current = [80, 180, 320].map((delay) =>
+      window.setTimeout(fitVisibleTerminals, delay),
+    );
+  }
+
+  function resetLayoutWeights() {
+    setColumnWeights(createEqualWeights(activeLayout.columns));
+    setRowWeights(createEqualWeights(activeLayout.rows));
+    scheduleVisibleTerminalFit(true);
+  }
+
+  function startLayoutResize(
+    axis: ResizeAxis,
+    index: number,
+    event: ReactPointerEvent<HTMLDivElement>,
+  ) {
+    if (event.button !== 0) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    resizeDragRef.current = {
+      axis,
+      index,
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startSizes: axis === "column" ? columnWeights : rowWeights,
+    };
+    setIsResizingLayout(true);
+  }
+
+  function updateLayoutResize(event: ReactPointerEvent<HTMLDivElement>) {
+    const drag = resizeDragRef.current;
+    const surface = terminalSurfaceRef.current;
+    if (!drag || drag.pointerId !== event.pointerId || !surface) return;
+
+    event.preventDefault();
+    const rect = surface.getBoundingClientRect();
+    if (drag.axis === "column") {
+      const delta = event.clientX - drag.startClientX;
+      setColumnWeights(resizeAdjacentWeights(drag.startSizes, drag.index, delta, rect.width));
+    } else {
+      const delta = event.clientY - drag.startClientY;
+      setRowWeights(resizeAdjacentWeights(drag.startSizes, drag.index, delta, rect.height));
+    }
+    scheduleVisibleTerminalFit();
+  }
+
+  function finishLayoutResize(event: ReactPointerEvent<HTMLDivElement>) {
+    const drag = resizeDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      // Pointer capture can already be released when the window loses focus.
+    }
+    resizeDragRef.current = null;
+    setIsResizingLayout(false);
+    scheduleVisibleTerminalFit(true);
+  }
 
   const updateRuntime = useCallback((tabId: string, runtime: TerminalSessionRuntime) => {
     setTabRuntime((current) => ({
@@ -125,6 +259,7 @@ export function TerminalPane({
     setRoutedCommand(null);
     setTabRuntime({});
     setTerminalTabs(next);
+    resetLayoutWeights();
   }, [activeProjectId]);
 
   useEffect(() => {
@@ -146,10 +281,16 @@ export function TerminalPane({
   }, [terminalTabs.activeTabId, terminalTabs.tabs.length]);
 
   useEffect(() => {
-    window.setTimeout(() => {
-      visibleTabs.forEach((tab) => terminalHandlesRef.current[tab.id]?.fit());
-    }, 0);
+    scheduleVisibleTerminalFit(true);
   }, [layoutMode, visibleTabs]);
+
+  useEffect(() => {
+    setColumnWeights(createEqualWeights(activeLayout.columns));
+    setRowWeights(createEqualWeights(activeLayout.rows));
+    scheduleVisibleTerminalFit(true);
+  }, [activeLayout.columns, activeLayout.rows]);
+
+  useEffect(() => () => clearTerminalFitTimers(), []);
 
   function addTerminalTab() {
     const tab = createTerminalTab(nextTabIndexRef.current);
@@ -327,10 +468,11 @@ export function TerminalPane({
       </header>
 
       <div
-        className="terminal-surface"
+        className={`terminal-surface ${isResizingLayout ? "resizing" : ""}`}
+        ref={terminalSurfaceRef}
         style={{
-          "--terminal-grid-columns": activeLayout.columns,
-          "--terminal-grid-rows": activeLayout.rows,
+          gridTemplateColumns: formatGridWeights(columnWeights),
+          gridTemplateRows: formatGridWeights(rowWeights),
         } as CSSProperties}
       >
         {terminalTabs.tabs.map((tab) => (
@@ -377,6 +519,44 @@ export function TerminalPane({
             />
           </div>
         ))}
+        {activeLayout.columns > 1 &&
+          columnWeights.slice(0, -1).map((_, index) => (
+            <div
+              aria-label="调整终端列宽"
+              aria-orientation="vertical"
+              className="terminal-resize-handle column"
+              key={`column-${index}`}
+              role="separator"
+              style={{
+                left: `calc(10px + (100% - 20px) * ${getResizeBoundaryPercent(columnWeights, index) / 100})`,
+              }}
+              title="拖动调整列宽，双击重置"
+              onDoubleClick={resetLayoutWeights}
+              onPointerCancel={finishLayoutResize}
+              onPointerDown={(event) => startLayoutResize("column", index, event)}
+              onPointerMove={updateLayoutResize}
+              onPointerUp={finishLayoutResize}
+            />
+          ))}
+        {activeLayout.rows > 1 &&
+          rowWeights.slice(0, -1).map((_, index) => (
+            <div
+              aria-label="调整终端行高"
+              aria-orientation="horizontal"
+              className="terminal-resize-handle row"
+              key={`row-${index}`}
+              role="separator"
+              style={{
+                top: `calc(10px + (100% - 20px) * ${getResizeBoundaryPercent(rowWeights, index) / 100})`,
+              }}
+              title="拖动调整行高，双击重置"
+              onDoubleClick={resetLayoutWeights}
+              onPointerCancel={finishLayoutResize}
+              onPointerDown={(event) => startLayoutResize("row", index, event)}
+              onPointerMove={updateLayoutResize}
+              onPointerUp={finishLayoutResize}
+            />
+          ))}
       </div>
     </section>
   );

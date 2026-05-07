@@ -596,14 +596,71 @@ button {
 
 .terminal-surface {
   display: grid;
-  grid-template-columns: repeat(var(--terminal-grid-columns, 1), minmax(0, 1fr));
-  grid-template-rows: repeat(var(--terminal-grid-rows, 1), minmax(0, 1fr));
+  position: relative;
   gap: 8px;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
   padding: 10px;
   background: transparent;
+}
+
+.terminal-surface.resizing {
+  user-select: none;
+}
+
+.terminal-resize-handle {
+  position: absolute;
+  z-index: 20;
+  border-radius: 999px;
+  opacity: 0;
+  transition:
+    background 120ms ease,
+    opacity 120ms ease;
+}
+
+.terminal-surface:hover .terminal-resize-handle,
+.terminal-surface.resizing .terminal-resize-handle,
+.terminal-resize-handle:hover {
+  opacity: 1;
+}
+
+.terminal-resize-handle::after {
+  position: absolute;
+  content: "";
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--terminal-accent, #8ab4ff) 68%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--terminal-bg, #070b10) 90%, transparent);
+}
+
+.terminal-resize-handle.column {
+  top: 10px;
+  bottom: 10px;
+  width: 16px;
+  margin-left: -8px;
+  cursor: col-resize;
+}
+
+.terminal-resize-handle.column::after {
+  top: 26px;
+  bottom: 26px;
+  left: 7px;
+  width: 2px;
+}
+
+.terminal-resize-handle.row {
+  right: 10px;
+  left: 10px;
+  height: 16px;
+  margin-top: -8px;
+  cursor: row-resize;
+}
+
+.terminal-resize-handle.row::after {
+  top: 7px;
+  right: 26px;
+  left: 26px;
+  height: 2px;
 }
 
 .terminal-cell {
