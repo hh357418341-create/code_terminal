@@ -38,6 +38,8 @@ interface ResizeDragState {
   startSizes: number[];
 }
 
+type TerminalRuntimeStatus = "starting" | "running" | "stopped";
+
 const terminalLayoutModes: Array<{
   mode: TerminalLayoutMode;
   label: string;
@@ -81,6 +83,15 @@ function formatTerminalPath(path?: string | null) {
   if (parts.length <= 3) return path;
 
   return `.../${parts.slice(-3).join("/")}`;
+}
+
+function getTerminalRuntimeStatus(runtime?: TerminalSessionRuntime): {
+  status: TerminalRuntimeStatus;
+  label: string;
+} {
+  if (runtime?.isStarting) return { status: "starting", label: "启动中" };
+  if (runtime?.session) return { status: "running", label: "运行中" };
+  return { status: "stopped", label: "已停止" };
 }
 
 function createEqualWeights(count: number) {
@@ -141,7 +152,6 @@ export function TerminalPane({
   } | null>(null);
 
   const activeRuntime = tabRuntime[terminalTabs.activeTabId];
-  const activeCwd = activeRuntime?.session?.cwd || activeProjectPath || "未绑定项目目录";
   const visibleTabs = useMemo(() => {
     const activeIndex = terminalTabs.tabs.findIndex((tab) => tab.id === terminalTabs.activeTabId);
     if (activeIndex < 0) return terminalTabs.tabs.slice(0, activeLayout.visibleCount);
@@ -369,7 +379,7 @@ export function TerminalPane({
     <section className="terminal-pane">
       <header className="terminal-bar">
         <div className="terminal-tab-strip">
-          <strong className="terminal-bar-title">Terminal Tiles</strong>
+          <strong className="terminal-bar-title">终端瓦片</strong>
           <div
             className="terminal-tabs"
             ref={terminalTabsRef}
@@ -386,7 +396,7 @@ export function TerminalPane({
             {terminalTabs.tabs.map((tab) => {
               const runtime = tabRuntime[tab.id];
               const isActive = tab.id === terminalTabs.activeTabId;
-              const status = runtime?.isStarting ? "starting" : runtime?.session ? "running" : "stopped";
+              const { status } = getTerminalRuntimeStatus(runtime);
 
               return (
                 <div
@@ -425,9 +435,6 @@ export function TerminalPane({
           <button className="terminal-tab-add" title="新建终端" onClick={addTerminalTab}>
             <Plus size={14} />
           </button>
-          <span className="terminal-active-path" title={activeCwd}>
-            {activeCwd}
-          </span>
         </div>
 
         <div className="terminal-actions">
@@ -475,50 +482,53 @@ export function TerminalPane({
           gridTemplateRows: formatGridWeights(rowWeights),
         } as CSSProperties}
       >
-        {terminalTabs.tabs.map((tab) => (
-          <div
-            className={`terminal-cell ${tab.id === terminalTabs.activeTabId ? "active" : ""} ${
-              visibleTabIds.has(tab.id) ? "visible" : ""
-            }`}
-            key={tab.id}
-            onMouseDown={() => focusTerminal(tab.id)}
-          >
-            <div className="terminal-cell-header">
-              <span className="terminal-cell-title">
-                <span
-                  className={`terminal-cell-status ${
-                    tabRuntime[tab.id]?.isStarting
-                      ? "starting"
-                      : tabRuntime[tab.id]?.session
-                        ? "running"
-                        : "stopped"
-                  }`}
-                />
-                {tab.title}
-              </span>
-              <span className="terminal-cell-path">
-                {formatTerminalPath(tabRuntime[tab.id]?.session?.cwd || activeProjectPath)}
-              </span>
+        {terminalTabs.tabs.map((tab) => {
+          const runtime = tabRuntime[tab.id];
+          const { status, label } = getTerminalRuntimeStatus(runtime);
+          const cwd = runtime?.session?.cwd || activeProjectPath;
+
+          return (
+            <div
+              className={`terminal-cell ${tab.id === terminalTabs.activeTabId ? "active" : ""} ${
+                visibleTabIds.has(tab.id) ? "visible" : ""
+              }`}
+              key={tab.id}
+              onMouseDown={() => focusTerminal(tab.id)}
+            >
+              <div className="terminal-cell-header">
+                <span className="terminal-cell-meta">
+                  <span className="terminal-cell-title">
+                    <span className={`terminal-cell-status ${status}`} />
+                    <span>{tab.title}</span>
+                  </span>
+                  {status !== "stopped" && (
+                    <span className={`terminal-cell-state ${status}`}>{label}</span>
+                  )}
+                </span>
+                <span className="terminal-cell-path" title={cwd || "未绑定项目目录"}>
+                  {formatTerminalPath(cwd)}
+                </span>
+              </div>
+              <TerminalSessionView
+                ref={(handle) => {
+                  if (handle) {
+                    terminalHandlesRef.current[tab.id] = handle;
+                  } else {
+                    delete terminalHandlesRef.current[tab.id];
+                  }
+                }}
+                tabId={tab.id}
+                isActive={tab.id === terminalTabs.activeTabId}
+                isVisible={visibleTabIds.has(tab.id)}
+                activeProjectId={activeProjectId}
+                appearance={appearance}
+                commandRequest={routedCommand?.tabId === tab.id ? routedCommand.request : null}
+                onError={onError}
+                onRuntimeChange={updateRuntime}
+              />
             </div>
-            <TerminalSessionView
-              ref={(handle) => {
-                if (handle) {
-                  terminalHandlesRef.current[tab.id] = handle;
-                } else {
-                  delete terminalHandlesRef.current[tab.id];
-                }
-              }}
-              tabId={tab.id}
-              isActive={tab.id === terminalTabs.activeTabId}
-              isVisible={visibleTabIds.has(tab.id)}
-              activeProjectId={activeProjectId}
-              appearance={appearance}
-              commandRequest={routedCommand?.tabId === tab.id ? routedCommand.request : null}
-              onError={onError}
-              onRuntimeChange={updateRuntime}
-            />
-          </div>
-        ))}
+          );
+        })}
         {activeLayout.columns > 1 &&
           columnWeights.slice(0, -1).map((_, index) => (
             <div

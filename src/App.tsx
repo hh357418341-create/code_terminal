@@ -145,9 +145,14 @@ export function App() {
     <main className="shell">
       <aside className="sidebar">
         <div className="project-root">
-          <div className="project-root-title">
-            <SquareTerminal size={22} />
-            <span>{productName}</span>
+          <div className="project-root-title" title={productName}>
+            <span className="brand-mark">
+              <SquareTerminal size={18} />
+            </span>
+            <span className="brand-copy">
+              <strong>{productName}</strong>
+              <small>Terminal Workbench</small>
+            </span>
           </div>
           <button className="sidebar-icon" title="打开项目" onClick={chooseProject}>
             <Plus size={16} />
@@ -168,14 +173,18 @@ export function App() {
                 onClick={() => setActive(project.id)}
               >
                 <FolderOpen className="project-item-icon" size={15} />
-                <span className="project-title">{project.name}</span>
-                <span className="project-time">{formatRelativeTime(project.lastOpenedAt)}</span>
+                <span className="project-copy">
+                  <span className="project-title">{project.name}</span>
+                  <span className="project-path">{project.path}</span>
+                </span>
+                <span className="project-time">{formatRelativeTime(project.lastOpenedAt)}前</span>
               </button>
             ))
           )}
         </nav>
 
         <div className="sidebar-footer">
+          <span className="project-count">{state.projects.length} 个项目</span>
           <button
             className="footer-button"
             title="刷新"
@@ -194,6 +203,7 @@ export function App() {
               <PanelsTopLeft size={18} />
             </div>
             <div>
+              <span className="workspace-kicker">当前工作区</span>
               <h2>{activeProject?.name || productName}</h2>
               <p>{activeProject?.path || "选择项目后，右侧终端会切到对应目录，可按瓦片查看多个任务"}</p>
             </div>

@@ -82,7 +82,7 @@ export const terminalThemePresets: Record<BuiltInTerminalThemePreset, TerminalTh
     blue: "#1769aa",
     magenta: "#7b3fb4",
     cyan: "#108999",
-    white: "#edf2f7",
+    white: "#475569",
     brightBlack: "#718096",
     brightRed: "#e05260",
     brightGreen: "#38a169",
@@ -90,7 +90,7 @@ export const terminalThemePresets: Record<BuiltInTerminalThemePreset, TerminalTh
     brightBlue: "#3182ce",
     brightMagenta: "#9f7aea",
     brightCyan: "#22a6b3",
-    brightWhite: "#ffffff",
+    brightWhite: "#111827",
   },
   midnight: {
     label: "午夜",
@@ -148,7 +148,7 @@ export const terminalThemePresets: Record<BuiltInTerminalThemePreset, TerminalTh
 
 export const defaultTerminalAppearance: TerminalAppearanceSettings = {
   preset: fallbackTerminalPreset,
-  fontSize: 13,
+  fontSize: 14,
   background: terminalThemePresets.workbench.background,
   foreground: terminalThemePresets.workbench.foreground,
   cursor: terminalThemePresets.workbench.cursor,
