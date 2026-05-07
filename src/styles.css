@@ -190,7 +190,9 @@ button {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  background: var(--terminal-bg, #101820);
+  background:
+    radial-gradient(circle at 18% 0%, color-mix(in srgb, var(--terminal-accent, #8ab4ff) 8%, transparent), transparent 30%),
+    var(--terminal-bg, #070b10);
 }
 
 .workspace-bar {
@@ -198,11 +200,11 @@ button {
   align-items: center;
   justify-content: space-between;
   gap: 18px;
-  min-height: 64px;
-  padding: 12px 16px;
+  min-height: 58px;
+  padding: 10px 14px;
   color: var(--terminal-fg, #e6edf2);
-  background: var(--terminal-panel, #182129);
-  border-bottom: 1px solid var(--terminal-border, #24313a);
+  background: color-mix(in srgb, var(--terminal-panel, #0c1118) 86%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--terminal-border, #1a2433) 72%, transparent);
 }
 
 .project-heading {
@@ -218,8 +220,8 @@ button {
   width: 36px;
   height: 36px;
   flex-shrink: 0;
-  color: var(--terminal-panel, #182129);
-  background: var(--terminal-accent, #d8f36a);
+  color: var(--terminal-bg, #070b10);
+  background: var(--terminal-accent, #8ab4ff);
   border-radius: 8px;
 }
 
@@ -387,12 +389,12 @@ button {
 
 .terminal-pane {
   display: grid;
-  grid-template-rows: 38px minmax(0, 1fr);
+  grid-template-rows: 40px minmax(0, 1fr);
   flex: 1;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background: var(--terminal-bg, #101820);
+  background: transparent;
 }
 
 .terminal-bar {
@@ -401,10 +403,10 @@ button {
   justify-content: space-between;
   gap: 10px;
   min-width: 0;
-  padding: 0 10px;
+  padding: 0 12px;
   color: var(--terminal-fg, #d8e1e8);
-  background: var(--terminal-panel, #182129);
-  border-bottom: 1px solid var(--terminal-border, #24313a);
+  background: color-mix(in srgb, var(--terminal-panel, #0c1118) 78%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--terminal-border, #1a2433) 70%, transparent);
 }
 
 .terminal-tab-strip {
@@ -454,17 +456,15 @@ button {
   height: 25px;
   min-width: 0;
   flex-shrink: 0;
-  color: var(--terminal-muted, #93a2ae);
-  background: rgba(255, 255, 255, 0.06);
-  background: color-mix(in srgb, var(--terminal-fg, #d8e1e8) 8%, transparent);
-  border-radius: 6px;
+  color: var(--terminal-muted, #7f8b99);
+  background: transparent;
+  border-radius: 5px;
   overflow: hidden;
 }
 
 .terminal-tab.active {
   color: var(--terminal-fg, #d8e1e8);
-  background: rgba(255, 255, 255, 0.13);
-  background: color-mix(in srgb, var(--terminal-fg, #d8e1e8) 15%, transparent);
+  background: color-mix(in srgb, var(--terminal-fg, #d8e1e8) 11%, transparent);
 }
 
 .terminal-tab-main,
@@ -530,8 +530,7 @@ button {
   width: 25px;
   flex-shrink: 0;
   color: var(--terminal-fg, #d8e1e8);
-  background: rgba(255, 255, 255, 0.08);
-  background: color-mix(in srgb, var(--terminal-fg, #d8e1e8) 10%, transparent);
+  background: color-mix(in srgb, var(--terminal-fg, #d8e1e8) 9%, transparent);
   border-radius: 6px;
 }
 
@@ -559,8 +558,7 @@ button {
   gap: 2px;
   min-height: 28px;
   padding: 2px;
-  background: rgba(255, 255, 255, 0.07);
-  background: color-mix(in srgb, var(--terminal-fg, #d8e1e8) 9%, transparent);
+  background: color-mix(in srgb, var(--terminal-fg, #d8e1e8) 8%, transparent);
   border-radius: 7px;
 }
 
@@ -572,8 +570,7 @@ button {
   min-height: 24px;
   padding: 0 7px;
   color: var(--terminal-fg, #d8e1e8);
-  background: rgba(255, 255, 255, 0.08);
-  background: color-mix(in srgb, var(--terminal-fg, #d8e1e8) 10%, transparent);
+  background: color-mix(in srgb, var(--terminal-fg, #d8e1e8) 9%, transparent);
   border-radius: 6px;
   cursor: pointer;
   font-size: 11px;
@@ -601,25 +598,27 @@ button {
   display: grid;
   grid-template-columns: repeat(var(--terminal-grid-columns, 1), minmax(0, 1fr));
   grid-template-rows: repeat(var(--terminal-grid-rows, 1), minmax(0, 1fr));
-  gap: 5px;
+  gap: 8px;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  padding: 5px;
-  background: var(--terminal-bg, #101820);
+  padding: 10px;
+  background: transparent;
 }
 
 .terminal-cell {
   display: none;
-  grid-template-rows: 24px minmax(0, 1fr);
+  grid-template-rows: 30px minmax(0, 1fr);
   width: 100%;
   height: 100%;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background: var(--terminal-bg, #101820);
-  border: 1px solid var(--terminal-border, #24313a);
-  border-radius: 7px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--terminal-panel, #0c1118) 86%, transparent), var(--terminal-bg, #070b10) 48px),
+    var(--terminal-bg, #070b10);
+  border: 1px solid color-mix(in srgb, var(--terminal-border, #1a2433) 80%, transparent);
+  border-radius: 9px;
 }
 
 .terminal-cell.visible {
@@ -627,19 +626,22 @@ button {
 }
 
 .terminal-cell.active {
-  border-color: var(--terminal-accent, #d8f36a);
+  border-color: color-mix(in srgb, var(--terminal-accent, #8ab4ff) 72%, var(--terminal-border, #1a2433));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 8%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--terminal-accent, #8ab4ff) 12%, transparent);
 }
 
 .terminal-cell-header {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  gap: 7px;
+  gap: 9px;
   min-width: 0;
-  padding: 0 7px;
+  padding: 0 10px;
   color: var(--terminal-muted, #93a2ae);
-  background: var(--terminal-panel, #182129);
-  border-bottom: 1px solid var(--terminal-border, #24313a);
+  background: transparent;
+  border-bottom: 1px solid color-mix(in srgb, var(--terminal-border, #1a2433) 58%, transparent);
   font-size: 10px;
   line-height: 1;
 }
@@ -648,12 +650,32 @@ button {
   color: var(--terminal-fg, #d8e1e8);
 }
 
-.terminal-cell-header span:first-child {
+.terminal-cell-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
   font-weight: 700;
   white-space: nowrap;
 }
 
-.terminal-cell-header span:last-child {
+.terminal-cell-status {
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  background: #687482;
+  border-radius: 999px;
+}
+
+.terminal-cell-status.running {
+  background: #46d18c;
+}
+
+.terminal-cell-status.starting {
+  background: #f5c84b;
+}
+
+.terminal-cell-path {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -667,7 +689,7 @@ button {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background: var(--terminal-bg, #101820);
+  background: transparent;
 }
 
 .terminal-host.visible {
@@ -677,17 +699,30 @@ button {
 .terminal-host .xterm {
   width: 100%;
   height: 100%;
-  padding: 5px 7px;
-  background: var(--terminal-bg, #101820);
+  padding: 12px 14px 14px;
+  background: transparent;
 }
 
 .terminal-host .xterm-screen {
-  background: var(--terminal-bg, #101820);
+  background: transparent;
 }
 
 .terminal-host .xterm-viewport {
-  background-color: var(--terminal-bg, #101820);
+  background-color: transparent;
   overflow-y: auto;
+}
+
+.terminal-host .xterm-viewport::-webkit-scrollbar {
+  width: 8px;
+}
+
+.terminal-host .xterm-viewport::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--terminal-fg, #d8e1e8) 18%, transparent);
+  border-radius: 999px;
+}
+
+.terminal-host .xterm-viewport::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .terminal-host .xterm-cursor.xterm-cursor-blink {
@@ -730,7 +765,7 @@ button {
   }
 
   .terminal-cell {
-    grid-template-rows: 22px minmax(0, 1fr);
+    grid-template-rows: 24px minmax(0, 1fr);
   }
 
   .terminal-cell-header {
@@ -738,6 +773,6 @@ button {
   }
 
   .terminal-host .xterm {
-    padding: 4px 6px;
+    padding: 7px 9px;
   }
 }

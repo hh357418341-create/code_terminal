@@ -42,14 +42,14 @@ const fallbackTerminalPreset: BuiltInTerminalThemePreset = "workbench";
 export const terminalThemePresets: Record<BuiltInTerminalThemePreset, TerminalThemePalette> = {
   workbench: {
     label: "深色",
-    background: "#101820",
-    foreground: "#d8e1e8",
-    cursor: "#d8f36a",
-    selectionBackground: "#33515f",
-    panel: "#182129",
-    border: "#24313a",
-    muted: "#93a2ae",
-    black: "#101820",
+    background: "#070b10",
+    foreground: "#d7dde7",
+    cursor: "#8ab4ff",
+    selectionBackground: "#243b5a",
+    panel: "#0c1118",
+    border: "#1a2433",
+    muted: "#7f8b99",
+    black: "#070b10",
     red: "#ef6b73",
     green: "#7bd88f",
     yellow: "#f7d774",
@@ -148,7 +148,7 @@ export const terminalThemePresets: Record<BuiltInTerminalThemePreset, TerminalTh
 
 export const defaultTerminalAppearance: TerminalAppearanceSettings = {
   preset: fallbackTerminalPreset,
-  fontSize: 12,
+  fontSize: 13,
   background: terminalThemePresets.workbench.background,
   foreground: terminalThemePresets.workbench.foreground,
   cursor: terminalThemePresets.workbench.cursor,

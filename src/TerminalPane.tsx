@@ -63,6 +63,16 @@ function createInitialTabs(): TerminalTabsState {
   };
 }
 
+function formatTerminalPath(path?: string | null) {
+  if (!path) return "未绑定项目目录";
+
+  const normalized = path.replace(/\\/g, "/");
+  const parts = normalized.split("/").filter(Boolean);
+  if (parts.length <= 3) return path;
+
+  return `.../${parts.slice(-3).join("/")}`;
+}
+
 export function TerminalPane({
   activeProjectId,
   activeProjectPath,
@@ -332,8 +342,21 @@ export function TerminalPane({
             onMouseDown={() => focusTerminal(tab.id)}
           >
             <div className="terminal-cell-header">
-              <span>{tab.title}</span>
-              <span>{tabRuntime[tab.id]?.session?.cwd || activeProjectPath || "未绑定项目目录"}</span>
+              <span className="terminal-cell-title">
+                <span
+                  className={`terminal-cell-status ${
+                    tabRuntime[tab.id]?.isStarting
+                      ? "starting"
+                      : tabRuntime[tab.id]?.session
+                        ? "running"
+                        : "stopped"
+                  }`}
+                />
+                {tab.title}
+              </span>
+              <span className="terminal-cell-path">
+                {formatTerminalPath(tabRuntime[tab.id]?.session?.cwd || activeProjectPath)}
+              </span>
             </div>
             <TerminalSessionView
               ref={(handle) => {
