@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
+  GripVertical,
   ExternalLink,
   FolderOpen,
   Minus,
@@ -44,6 +45,7 @@ const colorFields: Array<{ key: TerminalColorKey; label: string }> = [
   { key: "cursor", label: "光标" },
 ];
 const customThemeLabel = "自定义";
+type ProjectDropPlacement = "before" | "after";
 
 function readStoredTerminalAppearance(): TerminalAppearanceSettings {
   try {
@@ -92,6 +94,11 @@ export function App() {
   const [state, setState] = useState<WorkbenchState>(emptyState);
   const [error, setError] = useState<string | null>(null);
   const [appearanceOpen, setAppearanceOpen] = useState(false);
+  const [draggedProjectId, setDraggedProjectId] = useState<string | null>(null);
+  const [projectDropTarget, setProjectDropTarget] = useState<{
+    id: string;
+    placement: ProjectDropPlacement;
+  } | null>(null);
   const [openingProjectWindowId, setOpeningProjectWindowId] = useState<string | null>(null);
   const [terminalAppearance, setTerminalAppearance] = useState<TerminalAppearanceSettings>(
     readStoredTerminalAppearance,
@@ -144,7 +151,7 @@ export function App() {
       setWindowProjectId(initialProjectId);
     }
 
-    const nextState = applyWindowProject(loaded, initialProjectId);
+    const nextState = applyWindowProject(loaded, initialProjectId || loaded.projects[0]?.id || loaded.activeProjectId);
     setState(nextState);
     if (loaded.terminalAppearance) {
       setTerminalAppearance(normalizeTerminalAppearance(loaded.terminalAppearance));
@@ -220,6 +227,57 @@ export function App() {
 
     const updated = await invoke<WorkbenchState>("set_active_project", { projectId });
     setState(updated);
+  }
+
+  function moveProject(
+    projects: WorkbenchState["projects"],
+    projectId: string,
+    targetProjectId: string,
+    placement: ProjectDropPlacement,
+  ) {
+    const fromIndex = projects.findIndex((project) => project.id === projectId);
+    const toIndex = projects.findIndex((project) => project.id === targetProjectId);
+    if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return projects;
+
+    const orderedProjects = [...projects];
+    const [project] = orderedProjects.splice(fromIndex, 1);
+    const nextTargetIndex = orderedProjects.findIndex((item) => item.id === targetProjectId);
+    const insertIndex = placement === "after" ? nextTargetIndex + 1 : nextTargetIndex;
+    orderedProjects.splice(insertIndex, 0, project);
+    return orderedProjects;
+  }
+
+  async function persistProjectOrder(projects: WorkbenchState["projects"]) {
+    const updated = await invoke<WorkbenchState>("reorder_projects", {
+      projectIds: projects.map((project) => project.id),
+    });
+    setState(applyWindowProject(updated));
+  }
+
+  function getProjectDropPlacement(event: React.DragEvent<HTMLElement>): ProjectDropPlacement {
+    const rect = event.currentTarget.getBoundingClientRect();
+    return event.clientY > rect.top + rect.height / 2 ? "after" : "before";
+  }
+
+  async function finishProjectDrag(targetProjectId: string, placement: ProjectDropPlacement) {
+    if (!draggedProjectId) return;
+
+    setProjectDropTarget(null);
+    if (draggedProjectId === targetProjectId) return;
+
+    const orderedProjects = moveProject(state.projects, draggedProjectId, targetProjectId, placement);
+    if (orderedProjects === state.projects) return;
+
+    setState((current) => ({
+      ...current,
+      projects: orderedProjects,
+    }));
+    try {
+      await persistProjectOrder(orderedProjects);
+    } catch (err) {
+      setError(String(err));
+      void loadState().catch((loadError) => setError(String(loadError)));
+    }
   }
 
   async function removeProject(projectId: string) {
@@ -355,9 +413,45 @@ export function App() {
             state.projects.map((project) => (
               <div
                 key={project.id}
-                className={`project-item ${project.id === currentProject?.id ? "active" : ""}`}
+                className={`project-item ${project.id === currentProject?.id ? "active" : ""} ${
+                  project.id === draggedProjectId ? "dragging" : ""
+                } ${
+                  projectDropTarget?.id === project.id ? `drag-over ${projectDropTarget.placement}` : ""
+                }`}
                 title={project.path}
+                onDragEnter={(event) => {
+                  event.preventDefault();
+                  if (draggedProjectId && draggedProjectId !== project.id) {
+                    setProjectDropTarget({ id: project.id, placement: getProjectDropPlacement(event) });
+                  }
+                }}
+                onDragOver={(event) => {
+                  if (!draggedProjectId || draggedProjectId === project.id) return;
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = "move";
+                  setProjectDropTarget({ id: project.id, placement: getProjectDropPlacement(event) });
+                }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  void finishProjectDrag(project.id, getProjectDropPlacement(event));
+                }}
               >
+                <button
+                  className="project-drag-handle"
+                  draggable
+                  title="拖动调整项目顺序"
+                  onDragStart={(event) => {
+                    setDraggedProjectId(project.id);
+                    event.dataTransfer.effectAllowed = "move";
+                    event.dataTransfer.setData("text/plain", project.id);
+                  }}
+                  onDragEnd={() => {
+                    setDraggedProjectId(null);
+                    setProjectDropTarget(null);
+                  }}
+                >
+                  <GripVertical size={14} />
+                </button>
                 <button
                   className="project-select"
                   title={project.path}

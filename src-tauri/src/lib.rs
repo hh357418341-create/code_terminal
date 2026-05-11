@@ -199,6 +199,46 @@ fn set_active_project(
 }
 
 #[tauri::command]
+fn reorder_projects(
+    app: AppHandle,
+    store: State<'_, StateStore>,
+    project_ids: Vec<String>,
+) -> Result<WorkbenchState, String> {
+    {
+        let mut state = store.0.lock().map_err(lock_error)?;
+        if project_ids.len() != state.projects.len() {
+            return Err("项目排序不完整".into());
+        }
+
+        let mut remaining = state.projects.clone();
+        let mut ordered_projects = Vec::with_capacity(remaining.len());
+        for project_id in project_ids {
+            let index = remaining
+                .iter()
+                .position(|project| project.id == project_id)
+                .ok_or_else(|| "项目排序包含未知项目".to_string())?;
+            ordered_projects.push(remaining.remove(index));
+        }
+
+        if !remaining.is_empty() {
+            return Err("项目排序包含重复项目".into());
+        }
+
+        state.projects = ordered_projects;
+        if !state
+            .projects
+            .iter()
+            .any(|project| Some(&project.id) == state.active_project_id.as_ref())
+        {
+            state.active_project_id = state.projects.first().map(|project| project.id.clone());
+        }
+        save_state_to_disk(&app, &state)?;
+    }
+
+    load_state(store)
+}
+
+#[tauri::command]
 fn remove_project(
     app: AppHandle,
     store: State<'_, StateStore>,
@@ -471,6 +511,7 @@ pub fn run() {
             set_terminal_appearance,
             upsert_project,
             set_active_project,
+            reorder_projects,
             remove_project,
             open_project_window,
             terminal_start,
