@@ -48,13 +48,13 @@ jobs:
             - Windows: primary supported build.
             - macOS: experimental build; signing and notarization are not configured yet.
             - Linux: experimental build; distro dependencies may vary.
-          releaseDraft: true
+          releaseDraft: false
           prerelease: true
 
       - name: Upload portable Windows exe
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          draft: true
+          draft: false
           prerelease: true
           files: src-tauri/target/release/code-terminal.exe
