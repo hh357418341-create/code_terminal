@@ -20,6 +20,8 @@ struct WorkbenchState {
     active_project_id: Option<String>,
     #[serde(default)]
     terminal_appearance: Option<TerminalAppearanceSettings>,
+    #[serde(default)]
+    custom_terminal_appearance: Option<TerminalAppearanceSettings>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -102,6 +104,7 @@ impl Default for WorkbenchState {
             projects: Vec::new(),
             active_project_id: None,
             terminal_appearance: None,
+            custom_terminal_appearance: None,
         }
     }
 }
@@ -124,7 +127,11 @@ fn set_terminal_appearance(
 ) -> Result<WorkbenchState, String> {
     {
         let mut state = store.0.lock().map_err(lock_error)?;
-        state.terminal_appearance = Some(normalize_terminal_appearance(appearance));
+        let appearance = normalize_terminal_appearance(appearance);
+        if appearance.preset == "custom" {
+            state.custom_terminal_appearance = Some(appearance.clone());
+        }
+        state.terminal_appearance = Some(appearance);
         save_state_to_disk(&app, &state)?;
     }
 
@@ -446,8 +453,15 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let state = load_state_from_disk(&app.handle()).unwrap_or_default();
+            let initial_project_id = initial_project_id_from_args();
+            if let Some(title) = initial_window_title(&state, initial_project_id.as_deref()) {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.set_title(&title);
+                }
+            }
+
             app.manage(StateStore(Mutex::new(state)));
-            app.manage(InitialProjectId(initial_project_id_from_args()));
+            app.manage(InitialProjectId(initial_project_id));
             app.manage(TerminalRegistry::default());
             Ok(())
         })
@@ -718,6 +732,18 @@ fn initial_project_id_from_args() -> Option<String> {
     }
 
     None
+}
+
+fn initial_window_title(
+    state: &WorkbenchState,
+    initial_project_id: Option<&str>,
+) -> Option<String> {
+    let project_id = initial_project_id.or(state.active_project_id.as_deref())?;
+    state
+        .projects
+        .iter()
+        .find(|project| project.id == project_id)
+        .map(|project| project.name.clone())
 }
 
 fn normalize_terminal_appearance(

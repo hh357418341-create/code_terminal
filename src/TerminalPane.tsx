@@ -10,14 +10,25 @@ import type { TerminalAppearanceSettings, TerminalCommandRequest } from "./types
 
 interface TerminalPaneProps {
   activeProjectId?: string | null;
+  activeProjectName?: string | null;
   activeProjectPath?: string | null;
   appearance: TerminalAppearanceSettings;
   commandRequest?: TerminalCommandRequest | null;
   onError: (message: string) => void;
+  onProjectFocus?: (projectId: string) => void | Promise<void>;
+}
+
+interface TerminalProjectBinding {
+  id?: string | null;
+  name?: string | null;
+  path?: string | null;
 }
 
 interface TerminalTab {
   id: string;
+  projectId?: string | null;
+  projectName?: string | null;
+  projectPath?: string | null;
   title: string;
 }
 
@@ -55,20 +66,42 @@ const terminalLayoutModes: Array<{
   { mode: "3x3", label: "3x3", title: "3 行 3 列", rows: 3, columns: 3, visibleCount: 9 },
 ];
 
-function createTerminalTab(index: number): TerminalTab {
+function projectTitle(name?: string | null, index?: number) {
+  const trimmedName = name?.trim();
+  if (!trimmedName) return `终端 ${index ?? 1}`;
+  return index && index > 1 ? `${trimmedName} · ${index}` : trimmedName;
+}
+
+function createTerminalTab(index: number, project?: TerminalProjectBinding): TerminalTab {
   const id =
     typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
       ? crypto.randomUUID()
       : `${Date.now()}-${Math.random()}`;
+  const projectName = project?.name?.trim() || null;
 
   return {
     id,
-    title: `终端 ${index}`,
+    projectId: project?.id || null,
+    projectName,
+    projectPath: project?.path || null,
+    title: projectTitle(projectName, index),
   };
 }
 
-function createInitialTabs(): TerminalTabsState {
-  const tab = createTerminalTab(1);
+function bindTerminalTab(tab: TerminalTab, index: number, project: TerminalProjectBinding): TerminalTab {
+  const projectName = project.name?.trim() || null;
+
+  return {
+    ...tab,
+    projectId: project.id || null,
+    projectName,
+    projectPath: project.path || null,
+    title: projectTitle(projectName, index),
+  };
+}
+
+function createInitialTabs(project?: TerminalProjectBinding): TerminalTabsState {
+  const tab = createTerminalTab(1, project);
   return {
     tabs: [tab],
     activeTabId: tab.id,
@@ -132,10 +165,12 @@ function getAutoLayoutMode(tabCount: number): TerminalLayoutMode {
 
 export function TerminalPane({
   activeProjectId,
+  activeProjectName,
   activeProjectPath,
   appearance,
   commandRequest,
   onError,
+  onProjectFocus,
 }: TerminalPaneProps) {
   const nextTabIndexRef = useRef(2);
   const terminalHandlesRef = useRef<Record<string, TerminalSessionHandle | undefined>>({});
@@ -147,7 +182,9 @@ export function TerminalPane({
   const resizeDragRef = useRef<ResizeDragState | null>(null);
   const lastRoutedCommandIdRef = useRef<number | null>(null);
   const previousProjectIdRef = useRef(activeProjectId);
-  const [terminalTabs, setTerminalTabs] = useState<TerminalTabsState>(createInitialTabs);
+  const [terminalTabs, setTerminalTabs] = useState<TerminalTabsState>(() =>
+    createInitialTabs({ id: activeProjectId, name: activeProjectName, path: activeProjectPath }),
+  );
   const [layoutMode, setLayoutMode] = useState<TerminalLayoutMode>("1x1");
   const activeLayout = terminalLayoutModes.find((layout) => layout.mode === layoutMode) ?? terminalLayoutModes[0];
   const [columnWeights, setColumnWeights] = useState(() => createEqualWeights(activeLayout.columns));
@@ -158,6 +195,14 @@ export function TerminalPane({
     tabId: string;
     request: TerminalCommandRequest;
   } | null>(null);
+  const activeProjectBinding = useMemo(
+    () => ({
+      id: activeProjectId || null,
+      name: activeProjectName || null,
+      path: activeProjectPath || null,
+    }),
+    [activeProjectId, activeProjectName, activeProjectPath],
+  );
 
   const activeRuntime = tabRuntime[terminalTabs.activeTabId];
   const visibleTabs = useMemo(() => {
@@ -270,15 +315,38 @@ export function TerminalPane({
     if (previousProjectIdRef.current === activeProjectId) return;
 
     previousProjectIdRef.current = activeProjectId;
-    const next = createInitialTabs();
-    nextTabIndexRef.current = 2;
-    terminalHandlesRef.current = {};
-    lastRoutedCommandIdRef.current = null;
     setRoutedCommand(null);
-    setTabRuntime({});
-    setTerminalTabs(next);
-    resetLayoutWeights();
-  }, [activeProjectId]);
+
+    setTerminalTabs((current) => {
+      if (!activeProjectId) return current;
+
+      const existingTab = current.tabs.find((tab) => tab.projectId === activeProjectId);
+      if (existingTab) {
+        return {
+          ...current,
+          activeTabId: existingTab.id,
+        };
+      }
+
+      const emptyTabIndex = current.tabs.findIndex((tab) => !tab.projectId);
+      if (emptyTabIndex >= 0) {
+        const tabs = current.tabs.map((tab, index) =>
+          index === emptyTabIndex ? bindTerminalTab(tab, index + 1, activeProjectBinding) : tab,
+        );
+        return {
+          tabs,
+          activeTabId: tabs[emptyTabIndex].id,
+        };
+      }
+
+      const tab = createTerminalTab(nextTabIndexRef.current, activeProjectBinding);
+      nextTabIndexRef.current += 1;
+      return {
+        tabs: [...current.tabs, tab],
+        activeTabId: tab.id,
+      };
+    });
+  }, [activeProjectBinding, activeProjectId]);
 
   useEffect(() => {
     if (!commandRequest || lastRoutedCommandIdRef.current === commandRequest.id) return;
@@ -311,7 +379,7 @@ export function TerminalPane({
   useEffect(() => () => clearTerminalFitTimers(), []);
 
   function addTerminalTab() {
-    const tab = createTerminalTab(nextTabIndexRef.current);
+    const tab = createTerminalTab(nextTabIndexRef.current, activeProjectBinding);
     nextTabIndexRef.current += 1;
 
     setTerminalTabs((current) => ({
@@ -328,7 +396,7 @@ export function TerminalPane({
 
       const tabs = [...current.tabs];
       while (tabs.length < layout.visibleCount) {
-        tabs.push(createTerminalTab(nextTabIndexRef.current));
+        tabs.push(createTerminalTab(nextTabIndexRef.current, activeProjectBinding));
         nextTabIndexRef.current += 1;
       }
 
@@ -351,9 +419,10 @@ export function TerminalPane({
     const closingIndex = terminalTabs.tabs.findIndex((tab) => tab.id === tabId);
     if (closingIndex < 0) return;
 
+    const isClosingActiveTab = terminalTabs.activeTabId === tabId;
     const tabs = terminalTabs.tabs.filter((tab) => tab.id !== tabId);
     const fallbackTab = tabs[Math.max(0, closingIndex - 1)] ?? tabs[0];
-    const activeTabId = terminalTabs.activeTabId === tabId ? fallbackTab.id : terminalTabs.activeTabId;
+    const activeTabId = isClosingActiveTab ? fallbackTab.id : terminalTabs.activeTabId;
 
     void terminalHandlesRef.current[tabId]?.stopSession();
 
@@ -365,6 +434,9 @@ export function TerminalPane({
     setRoutedCommand((current) => (current?.tabId === tabId ? null : current));
     setTerminalTabs({ tabs, activeTabId });
     setLayoutMode(getAutoLayoutMode(tabs.length));
+    if (isClosingActiveTab && fallbackTab.projectId && fallbackTab.projectId !== activeProjectId) {
+      void onProjectFocus?.(fallbackTab.projectId);
+    }
 
     window.setTimeout(() => scheduleVisibleTerminalFit(true), 0);
   }
@@ -378,10 +450,14 @@ export function TerminalPane({
   }
 
   function focusTerminal(tabId: string) {
+    const tab = terminalTabs.tabs.find((item) => item.id === tabId);
     setTerminalTabs((current) => ({
       ...current,
       activeTabId: tabId,
     }));
+    if (tab?.projectId && tab.projectId !== activeProjectId) {
+      onProjectFocus?.(tab.projectId);
+    }
     window.setTimeout(() => terminalHandlesRef.current[tabId]?.focus(), 0);
   }
 
@@ -420,7 +496,7 @@ export function TerminalPane({
                     className="terminal-tab-main"
                     role="tab"
                     aria-selected={isActive}
-                    title={runtime?.session?.cwd || activeProjectPath || tab.title}
+                    title={runtime?.session?.cwd || tab.projectPath || tab.title}
                     onClick={() => focusTerminal(tab.id)}
                   >
                     <span className={`terminal-tab-dot ${status}`} />
@@ -495,7 +571,7 @@ export function TerminalPane({
         {terminalTabs.tabs.map((tab) => {
           const runtime = tabRuntime[tab.id];
           const { status, label } = getTerminalRuntimeStatus(runtime);
-          const cwd = runtime?.session?.cwd || activeProjectPath;
+          const cwd = runtime?.session?.cwd || tab.projectPath;
 
           return (
             <div
@@ -542,7 +618,7 @@ export function TerminalPane({
                 tabId={tab.id}
                 isActive={tab.id === terminalTabs.activeTabId}
                 isVisible={visibleTabIds.has(tab.id)}
-                activeProjectId={activeProjectId}
+                activeProjectId={tab.projectId || null}
                 appearance={appearance}
                 commandRequest={routedCommand?.tabId === tab.id ? routedCommand.request : null}
                 onError={onError}

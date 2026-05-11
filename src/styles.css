@@ -474,9 +474,9 @@ input {
 }
 
 .appearance-bar {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) repeat(3, max-content);
   align-items: center;
-  flex-wrap: wrap;
   gap: 12px 20px;
   min-height: 54px;
   padding: 9px 18px;
@@ -488,7 +488,17 @@ input {
 .appearance-group {
   display: flex;
   align-items: center;
+  justify-self: start;
   gap: 8px;
+  min-width: 0;
+}
+
+.theme-group {
+  display: grid;
+  grid-column: 1 / -1;
+  justify-self: stretch;
+  grid-template-columns: auto minmax(0, 1fr);
+  width: 100%;
   min-width: 0;
 }
 
@@ -513,8 +523,10 @@ input {
 }
 
 .theme-segments {
-  max-width: min(56vw, 590px);
+  width: 100%;
+  min-width: 0;
   overflow-x: auto;
+  overflow-y: hidden;
   scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--terminal-fg, #d8e1e8) 24%, transparent) transparent;
 }

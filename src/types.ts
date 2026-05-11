@@ -12,6 +12,7 @@ export interface WorkbenchState {
   projects: Project[];
   activeProjectId?: string | null;
   terminalAppearance?: TerminalAppearanceSettings | null;
+  customTerminalAppearance?: TerminalAppearanceSettings | null;
 }
 
 export type BuiltInTerminalThemePreset =

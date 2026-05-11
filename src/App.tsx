@@ -17,6 +17,7 @@ import { TerminalPane } from "./TerminalPane";
 import {
   clampTerminalFontSize,
   clampTerminalLineHeight,
+  defaultTerminalAppearance,
   getTerminalChrome,
   getTerminalPresetAppearance,
   normalizeTerminalAppearance,
@@ -35,13 +36,14 @@ const emptyState: WorkbenchState = {
   projects: [],
   activeProjectId: null,
 };
-const productName = "Code Terminal";
+const emptyProjectTitle = "未选择项目";
 const appearanceStorageKey = "opencode-workbench.terminal-appearance";
 const colorFields: Array<{ key: TerminalColorKey; label: string }> = [
   { key: "background", label: "背景" },
   { key: "foreground", label: "文字" },
   { key: "cursor", label: "光标" },
 ];
+const customThemeLabel = "自定义";
 
 function readStoredTerminalAppearance(): TerminalAppearanceSettings {
   try {
@@ -94,12 +96,24 @@ export function App() {
   const [terminalAppearance, setTerminalAppearance] = useState<TerminalAppearanceSettings>(
     readStoredTerminalAppearance,
   );
+  const [customTerminalAppearance, setCustomTerminalAppearance] = useState<TerminalAppearanceSettings>(() =>
+    normalizeTerminalAppearance({ ...readStoredTerminalAppearance(), preset: "custom" }),
+  );
+  const [fontSizeInput, setFontSizeInput] = useState(() => String(terminalAppearance.fontSize));
   const [lineHeightInput, setLineHeightInput] = useState(() => terminalAppearance.lineHeight.toFixed(2));
 
   const activeProject = useMemo(
     () => state.projects.find((project) => project.id === state.activeProjectId) ?? null,
     [state.activeProjectId, state.projects],
   );
+  const windowProject = useMemo(
+    () => state.projects.find((project) => project.id === windowProjectId) ?? null,
+    [state.projects, windowProjectId],
+  );
+  const currentProject = windowProject || activeProject;
+  const appHeaderTitle = currentProject?.name || emptyProjectTitle;
+  const appHeaderSubtitle = currentProject?.path || "打开项目目录";
+  const appHeaderTooltip = currentProject?.path || emptyProjectTitle;
   const terminalChromeVars = useMemo(() => {
     const chrome = getTerminalChrome(terminalAppearance);
     return {
@@ -135,6 +149,13 @@ export function App() {
     if (loaded.terminalAppearance) {
       setTerminalAppearance(normalizeTerminalAppearance(loaded.terminalAppearance));
     }
+    if (loaded.customTerminalAppearance) {
+      setCustomTerminalAppearance(
+        normalizeTerminalAppearance({ ...loaded.customTerminalAppearance, preset: "custom" }),
+      );
+    } else if (loaded.terminalAppearance?.preset === "custom") {
+      setCustomTerminalAppearance(normalizeTerminalAppearance(loaded.terminalAppearance));
+    }
     return nextState;
   }
 
@@ -161,14 +182,18 @@ export function App() {
   }, [terminalAppearance]);
 
   useEffect(() => {
+    setFontSizeInput(String(terminalAppearance.fontSize));
+  }, [terminalAppearance.fontSize]);
+
+  useEffect(() => {
     setLineHeightInput(terminalAppearance.lineHeight.toFixed(2));
   }, [terminalAppearance.lineHeight]);
 
   useEffect(() => {
-    const title = activeProject?.name || productName;
+    const title = currentProject?.name || emptyProjectTitle;
     document.title = title;
     getCurrentWindow().setTitle(title).catch(() => undefined);
-  }, [activeProject?.name]);
+  }, [currentProject?.name]);
 
   async function chooseProject() {
     setError(null);
@@ -176,12 +201,16 @@ export function App() {
     if (!selected || Array.isArray(selected)) return;
 
     const updated = await invoke<WorkbenchState>("upsert_project", { path: selected });
-    setState(windowProjectId ? applyWindowProject(updated) : updated);
+    if (windowProjectId && updated.activeProjectId) {
+      setWindowProjectId(updated.activeProjectId);
+    }
+    setState(windowProjectId ? applyWindowProject(updated, updated.activeProjectId) : updated);
   }
 
   async function setActive(projectId: string) {
     setError(null);
     if (windowProjectId) {
+      setWindowProjectId(projectId);
       setState((current) => ({
         ...current,
         activeProjectId: projectId,
@@ -196,6 +225,11 @@ export function App() {
   async function removeProject(projectId: string) {
     setError(null);
     const updated = await invoke<WorkbenchState>("remove_project", { projectId });
+    if (windowProjectId === projectId) {
+      setWindowProjectId(updated.activeProjectId || null);
+      setState(applyWindowProject(updated, updated.activeProjectId));
+      return;
+    }
     setState(applyWindowProject(updated));
   }
 
@@ -217,11 +251,35 @@ export function App() {
     updateTerminalAppearance((current) => getTerminalPresetAppearance(preset, current.fontSize, current.lineHeight));
   }
 
+  function applyCustomTheme() {
+    updateTerminalAppearance((current) =>
+      normalizeTerminalAppearance({
+        ...customTerminalAppearance,
+        preset: "custom",
+        fontSize: current.fontSize,
+        lineHeight: current.lineHeight,
+      }),
+    );
+  }
+
   function changeFontSize(delta: number) {
     updateTerminalAppearance((current) => ({
       ...current,
       fontSize: clampTerminalFontSize(current.fontSize + delta),
     }));
+  }
+
+  function commitFontSizeInput(value = fontSizeInput) {
+    const parsed = Number(value);
+    const nextFontSize = Number.isFinite(parsed)
+      ? clampTerminalFontSize(parsed)
+      : terminalAppearance.fontSize;
+
+    updateTerminalAppearance((current) => ({
+      ...current,
+      fontSize: nextFontSize,
+    }));
+    setFontSizeInput(String(nextFontSize));
   }
 
   function changeLineHeight(delta: number) {
@@ -259,6 +317,9 @@ export function App() {
   ) {
     setTerminalAppearance((current) => {
       const nextAppearance = normalizeTerminalAppearance(updater(current));
+      if (nextAppearance.preset === "custom") {
+        setCustomTerminalAppearance(nextAppearance);
+      }
       cacheTerminalAppearance(nextAppearance);
       void invoke<WorkbenchState>("set_terminal_appearance", { appearance: nextAppearance }).catch((err) =>
         setError(String(err)),
@@ -271,13 +332,13 @@ export function App() {
     <main className="shell" style={terminalChromeVars}>
       <aside className="sidebar">
         <div className="project-root">
-          <div className="project-root-title" title={productName}>
+          <div className="project-root-title" title={appHeaderTooltip}>
             <span className="brand-mark">
               <SquareTerminal size={18} />
             </span>
             <span className="brand-copy">
-              <strong>{productName}</strong>
-              <small>Terminal Workbench</small>
+              <strong>{appHeaderTitle}</strong>
+              <small>{appHeaderSubtitle}</small>
             </span>
           </div>
           <button className="sidebar-icon" title="打开项目" onClick={chooseProject}>
@@ -294,7 +355,7 @@ export function App() {
             state.projects.map((project) => (
               <div
                 key={project.id}
-                className={`project-item ${project.id === state.activeProjectId ? "active" : ""}`}
+                className={`project-item ${project.id === currentProject?.id ? "active" : ""}`}
                 title={project.path}
               >
                 <button
@@ -343,18 +404,18 @@ export function App() {
             </div>
             <div>
               <span className="workspace-kicker">当前工作区</span>
-              <h2>{activeProject?.name || productName}</h2>
-              <p>{activeProject?.path || "选择项目后，右侧终端会切到对应目录，可按瓦片查看多个任务"}</p>
+              <h2>{currentProject?.name || emptyProjectTitle}</h2>
+              <p>{currentProject?.path || "选择项目后，右侧终端会切到对应目录，可按瓦片查看多个任务"}</p>
             </div>
           </div>
 
           <div className="workspace-actions">
-            {activeProject && (
+            {currentProject && (
               <button
                 className="icon-button"
-                disabled={openingProjectWindowId === activeProject.id}
+                disabled={openingProjectWindowId === currentProject.id}
                 title="新窗口打开当前项目"
-                onClick={() => openProjectWindow(activeProject.id)}
+                onClick={() => openProjectWindow(currentProject.id)}
               >
                 <ExternalLink size={16} />
               </button>
@@ -368,8 +429,8 @@ export function App() {
               <Palette size={16} />
             </button>
 
-            {activeProject && (
-              <button className="icon-button danger" title="移除项目" onClick={() => removeProject(activeProject.id)}>
+            {currentProject && (
+              <button className="icon-button danger" title="移除项目" onClick={() => removeProject(currentProject.id)}>
                 <Trash2 size={16} />
               </button>
             )}
@@ -379,7 +440,7 @@ export function App() {
         {error && <div className="error-strip">{error}</div>}
         {appearanceOpen && (
           <section className="appearance-bar" aria-label="终端外观">
-            <div className="appearance-group">
+            <div className="appearance-group theme-group">
               <span className="appearance-label">主题</span>
               <div className="theme-segments">
                 {terminalThemePresetOrder.map((preset) => {
@@ -399,6 +460,20 @@ export function App() {
                     </button>
                   );
                 })}
+                <button
+                  className={`theme-choice ${terminalAppearance.preset === "custom" ? "active" : ""}`}
+                  title="切换到自定义主题"
+                  onClick={applyCustomTheme}
+                >
+                  <span
+                    className="theme-swatch"
+                    style={{
+                      background: customTerminalAppearance.background || defaultTerminalAppearance.background,
+                      borderColor: customTerminalAppearance.cursor || defaultTerminalAppearance.cursor,
+                    }}
+                  />
+                  {customThemeLabel}
+                </button>
               </div>
             </div>
 
@@ -408,7 +483,24 @@ export function App() {
                 <button title="减小字号" onClick={() => changeFontSize(-1)}>
                   <Minus size={13} />
                 </button>
-                <output>{terminalAppearance.fontSize}</output>
+                <input
+                  aria-label="字号"
+                  className="value-input"
+                  inputMode="numeric"
+                  max="22"
+                  min="10"
+                  step="1"
+                  title="输入 10 到 22 之间的字号"
+                  type="number"
+                  value={fontSizeInput}
+                  onBlur={() => commitFontSizeInput()}
+                  onChange={(event) => setFontSizeInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.currentTarget.blur();
+                    }
+                  }}
+                />
                 <button title="增大字号" onClick={() => changeFontSize(1)}>
                   <Plus size={13} />
                 </button>
@@ -461,10 +553,12 @@ export function App() {
         )}
 
         <TerminalPane
-          activeProjectId={activeProject?.id || null}
-          activeProjectPath={activeProject?.path || null}
+          activeProjectId={currentProject?.id || null}
+          activeProjectName={currentProject?.name || null}
+          activeProjectPath={currentProject?.path || null}
           appearance={terminalAppearance}
           onError={setError}
+          onProjectFocus={setActive}
         />
       </section>
     </main>
