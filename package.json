@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "tauri dev",
     "dev:frontend": "vite --host 127.0.0.1 --port 1420",
+    "tauri": "tauri",
     "build": "tauri build --no-bundle",
     "bundle": "tauri build",
     "build:frontend": "tsc && vite build",
