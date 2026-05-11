@@ -8,6 +8,12 @@
 
 ![Code Terminal preview](docs/code-terminal-preview.png)
 
+## 平台状态
+
+- **Windows**：主力支持平台，当前优先打磨和发布。
+- **macOS**：计划支持，已准备自动构建；未配置签名和 notarization 前先作为实验版本。
+- **Linux**：计划支持，已准备自动构建；不同发行版依赖和桌面环境仍需要继续验证。
+
 ## 适合谁
 
 - 经常在多个项目之间来回切换，需要快速打开不同项目终端的人
@@ -53,13 +59,33 @@ npm run bundle
 
 Windows MSI 打包会下载 WiX 工具链，网络较慢时可能需要重试。
 
+## GitHub Release
+
+仓库包含 GitHub Actions 工作流：
+
+- `CI`：在 push 和 pull request 时检查前端构建，并在 Windows、macOS、Linux 上运行 Rust backend `cargo check`。
+- `Release`：手动触发或推送 `app-v*` tag 时构建三平台安装产物，并创建 draft prerelease，方便检查后再公开发布。
+
+发布一个版本可以这样操作：
+
+```powershell
+git tag app-v0.1.0
+git push origin app-v0.1.0
+```
+
+如果当前网络需要代理：
+
+```powershell
+git -c http.proxy=http://127.0.0.1:7897 -c https.proxy=http://127.0.0.1:7897 push origin app-v0.1.0
+```
+
 ## 技术栈
 
 - **Desktop**：Tauri 2
 - **Frontend**：React 18、TypeScript、Vite
 - **Terminal UI**：xterm.js
 - **Backend**：Rust、portable-pty
-- **Platform focus**：Windows 优先，同时保留 macOS/Linux shell 启动逻辑
+- **Platform focus**：Windows 优先，macOS/Linux 持续验证
 
 ## 本地终端行为
 
