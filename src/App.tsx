@@ -1,10 +1,22 @@
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
-import { FolderOpen, Minus, Palette, PanelsTopLeft, Plus, RefreshCw, SquareTerminal, Trash2 } from "lucide-react";
+import {
+  ExternalLink,
+  FolderOpen,
+  Minus,
+  Palette,
+  PanelsTopLeft,
+  Plus,
+  RefreshCw,
+  SquareTerminal,
+  Trash2,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { TerminalPane } from "./TerminalPane";
 import {
   clampTerminalFontSize,
+  clampTerminalLineHeight,
   getTerminalChrome,
   getTerminalPresetAppearance,
   normalizeTerminalAppearance,
@@ -44,6 +56,18 @@ function readStoredTerminalAppearance(): TerminalAppearanceSettings {
   }
 }
 
+function cacheTerminalAppearance(appearance: TerminalAppearanceSettings) {
+  window.localStorage.setItem(appearanceStorageKey, JSON.stringify(appearance));
+}
+
+function getWindowProjectId() {
+  try {
+    return new URLSearchParams(window.location.search).get("projectId");
+  } catch {
+    return null;
+  }
+}
+
 function formatRelativeTime(value: number) {
   if (!value) return "";
 
@@ -62,12 +86,15 @@ function formatRelativeTime(value: number) {
 }
 
 export function App() {
+  const [windowProjectId, setWindowProjectId] = useState<string | null>(() => getWindowProjectId());
   const [state, setState] = useState<WorkbenchState>(emptyState);
   const [error, setError] = useState<string | null>(null);
   const [appearanceOpen, setAppearanceOpen] = useState(false);
+  const [openingProjectWindowId, setOpeningProjectWindowId] = useState<string | null>(null);
   const [terminalAppearance, setTerminalAppearance] = useState<TerminalAppearanceSettings>(
     readStoredTerminalAppearance,
   );
+  const [lineHeightInput, setLineHeightInput] = useState(() => terminalAppearance.lineHeight.toFixed(2));
 
   const activeProject = useMemo(
     () => state.projects.find((project) => project.id === state.activeProjectId) ?? null,
@@ -82,13 +109,47 @@ export function App() {
       "--terminal-border": chrome.border,
       "--terminal-muted": chrome.muted,
       "--terminal-accent": chrome.accent,
+      "--app-sidebar": chrome.sidebar,
+      "--app-sidebar-strong": chrome.sidebarStrong,
+      "--app-border": chrome.sidebarBorder,
+      "--app-text": chrome.sidebarText,
+      "--app-muted": chrome.sidebarMuted,
+      "--app-soft": chrome.sidebarSoft,
     } as CSSProperties;
   }, [terminalAppearance]);
 
   async function loadState() {
-    const loaded = await invoke<WorkbenchState>("load_state");
-    setState(loaded);
-    return loaded;
+    const [loaded, initialProjectId] = await Promise.all([
+      invoke<WorkbenchState>("load_state"),
+      windowProjectId
+        ? Promise.resolve(windowProjectId)
+        : invoke<string | null>("initial_project_id").catch(() => null),
+    ]);
+
+    if (initialProjectId && initialProjectId !== windowProjectId) {
+      setWindowProjectId(initialProjectId);
+    }
+
+    const nextState = applyWindowProject(loaded, initialProjectId);
+    setState(nextState);
+    if (loaded.terminalAppearance) {
+      setTerminalAppearance(normalizeTerminalAppearance(loaded.terminalAppearance));
+    }
+    return nextState;
+  }
+
+  function applyWindowProject(
+    loaded: WorkbenchState,
+    projectId = windowProjectId,
+  ): WorkbenchState {
+    if (!projectId || !loaded.projects.some((project) => project.id === projectId)) {
+      return loaded;
+    }
+
+    return {
+      ...loaded,
+      activeProjectId: projectId,
+    };
   }
 
   useEffect(() => {
@@ -96,8 +157,18 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    window.localStorage.setItem(appearanceStorageKey, JSON.stringify(terminalAppearance));
+    cacheTerminalAppearance(terminalAppearance);
   }, [terminalAppearance]);
+
+  useEffect(() => {
+    setLineHeightInput(terminalAppearance.lineHeight.toFixed(2));
+  }, [terminalAppearance.lineHeight]);
+
+  useEffect(() => {
+    const title = activeProject?.name || productName;
+    document.title = title;
+    getCurrentWindow().setTitle(title).catch(() => undefined);
+  }, [activeProject?.name]);
 
   async function chooseProject() {
     setError(null);
@@ -105,11 +176,19 @@ export function App() {
     if (!selected || Array.isArray(selected)) return;
 
     const updated = await invoke<WorkbenchState>("upsert_project", { path: selected });
-    setState(updated);
+    setState(windowProjectId ? applyWindowProject(updated) : updated);
   }
 
   async function setActive(projectId: string) {
     setError(null);
+    if (windowProjectId) {
+      setState((current) => ({
+        ...current,
+        activeProjectId: projectId,
+      }));
+      return;
+    }
+
     const updated = await invoke<WorkbenchState>("set_active_project", { projectId });
     setState(updated);
   }
@@ -117,22 +196,56 @@ export function App() {
   async function removeProject(projectId: string) {
     setError(null);
     const updated = await invoke<WorkbenchState>("remove_project", { projectId });
-    setState(updated);
+    setState(applyWindowProject(updated));
+  }
+
+  async function openProjectWindow(projectId: string) {
+    setError(null);
+    if (openingProjectWindowId) return;
+
+    setOpeningProjectWindowId(projectId);
+    try {
+      await invoke("open_project_window", { projectId });
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setOpeningProjectWindowId(null);
+    }
   }
 
   function applyThemePreset(preset: BuiltInTerminalThemePreset) {
-    setTerminalAppearance((current) => getTerminalPresetAppearance(preset, current.fontSize));
+    updateTerminalAppearance((current) => getTerminalPresetAppearance(preset, current.fontSize, current.lineHeight));
   }
 
   function changeFontSize(delta: number) {
-    setTerminalAppearance((current) => ({
+    updateTerminalAppearance((current) => ({
       ...current,
       fontSize: clampTerminalFontSize(current.fontSize + delta),
     }));
   }
 
+  function changeLineHeight(delta: number) {
+    updateTerminalAppearance((current) => ({
+      ...current,
+      lineHeight: clampTerminalLineHeight(current.lineHeight + delta),
+    }));
+  }
+
+  function commitLineHeightInput(value = lineHeightInput) {
+    const parsed = Number(value);
+    const nextLineHeight = Number.isFinite(parsed)
+      ? clampTerminalLineHeight(parsed)
+      : terminalAppearance.lineHeight;
+
+    updateTerminalAppearance((current) => ({
+      ...current,
+      lineHeight: nextLineHeight,
+    }));
+    setLineHeightInput(nextLineHeight.toFixed(2));
+  }
+
   function updateTerminalColor(key: TerminalColorKey, value: string) {
-    setTerminalAppearance((current) =>
+    updateTerminalAppearance((current) =>
       normalizeTerminalAppearance({
         ...current,
         preset: "custom",
@@ -141,8 +254,21 @@ export function App() {
     );
   }
 
+  function updateTerminalAppearance(
+    updater: (current: TerminalAppearanceSettings) => TerminalAppearanceSettings,
+  ) {
+    setTerminalAppearance((current) => {
+      const nextAppearance = normalizeTerminalAppearance(updater(current));
+      cacheTerminalAppearance(nextAppearance);
+      void invoke<WorkbenchState>("set_terminal_appearance", { appearance: nextAppearance }).catch((err) =>
+        setError(String(err)),
+      );
+      return nextAppearance;
+    });
+  }
+
   return (
-    <main className="shell">
+    <main className="shell" style={terminalChromeVars}>
       <aside className="sidebar">
         <div className="project-root">
           <div className="project-root-title" title={productName}>
@@ -166,19 +292,32 @@ export function App() {
             </button>
           ) : (
             state.projects.map((project) => (
-              <button
+              <div
                 key={project.id}
                 className={`project-item ${project.id === state.activeProjectId ? "active" : ""}`}
                 title={project.path}
-                onClick={() => setActive(project.id)}
               >
-                <FolderOpen className="project-item-icon" size={15} />
-                <span className="project-copy">
-                  <span className="project-title">{project.name}</span>
-                  <span className="project-path">{project.path}</span>
-                </span>
+                <button
+                  className="project-select"
+                  title={project.path}
+                  onClick={() => setActive(project.id)}
+                >
+                  <FolderOpen className="project-item-icon" size={15} />
+                  <span className="project-copy">
+                    <span className="project-title">{project.name}</span>
+                    <span className="project-path">{project.path}</span>
+                  </span>
+                </button>
                 <span className="project-time">{formatRelativeTime(project.lastOpenedAt)}前</span>
-              </button>
+                <button
+                  className="project-window-button"
+                  disabled={openingProjectWindowId === project.id}
+                  title="新窗口打开这个项目"
+                  onClick={() => openProjectWindow(project.id)}
+                >
+                  <ExternalLink size={13} />
+                </button>
+              </div>
             ))
           )}
         </nav>
@@ -196,7 +335,7 @@ export function App() {
         </div>
       </aside>
 
-      <section className="workspace" style={terminalChromeVars}>
+      <section className="workspace">
         <header className="workspace-bar">
           <div className="project-heading">
             <div className="terminal-mark">
@@ -210,6 +349,17 @@ export function App() {
           </div>
 
           <div className="workspace-actions">
+            {activeProject && (
+              <button
+                className="icon-button"
+                disabled={openingProjectWindowId === activeProject.id}
+                title="新窗口打开当前项目"
+                onClick={() => openProjectWindow(activeProject.id)}
+              >
+                <ExternalLink size={16} />
+              </button>
+            )}
+
             <button
               className={`icon-button ${appearanceOpen ? "active" : ""}`}
               title="终端外观"
@@ -238,6 +388,7 @@ export function App() {
                     <button
                       key={preset}
                       className={`theme-choice ${terminalAppearance.preset === preset ? "active" : ""}`}
+                      title={`${palette.label}主题`}
                       onClick={() => applyThemePreset(preset)}
                     >
                       <span
@@ -253,12 +404,42 @@ export function App() {
 
             <div className="appearance-group">
               <span className="appearance-label">字号</span>
-              <div className="font-stepper">
+              <div className="value-stepper">
                 <button title="减小字号" onClick={() => changeFontSize(-1)}>
                   <Minus size={13} />
                 </button>
                 <output>{terminalAppearance.fontSize}</output>
                 <button title="增大字号" onClick={() => changeFontSize(1)}>
+                  <Plus size={13} />
+                </button>
+              </div>
+            </div>
+
+            <div className="appearance-group">
+              <span className="appearance-label">行距</span>
+              <div className="value-stepper">
+                <button title="减小行间距" onClick={() => changeLineHeight(-0.04)}>
+                  <Minus size={13} />
+                </button>
+                <input
+                  aria-label="行间距"
+                  className="value-input"
+                  inputMode="decimal"
+                  max="1.8"
+                  min="1"
+                  step="0.01"
+                  title="输入 1.00 到 1.80 之间的行间距"
+                  type="number"
+                  value={lineHeightInput}
+                  onBlur={() => commitLineHeightInput()}
+                  onChange={(event) => setLineHeightInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.currentTarget.blur();
+                    }
+                  }}
+                />
+                <button title="增大行间距" onClick={() => changeLineHeight(0.04)}>
                   <Plus size={13} />
                 </button>
               </div>

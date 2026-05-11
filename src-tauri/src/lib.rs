@@ -1,11 +1,12 @@
-use portable_pty::{native_pty_system, Child as PtyChild, CommandBuilder, MasterPty, PtySize};
+use portable_pty::{native_pty_system, Child as PtyChild, CommandBuilder, PtySize};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     fs,
     io::{Read, Write},
     path::{Path, PathBuf},
-    sync::Mutex,
+    process::Command,
+    sync::{mpsc, Mutex},
     thread,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -17,6 +18,8 @@ use uuid::Uuid;
 struct WorkbenchState {
     projects: Vec<Project>,
     active_project_id: Option<String>,
+    #[serde(default)]
+    terminal_appearance: Option<TerminalAppearanceSettings>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,6 +30,17 @@ struct Project {
     path: String,
     status: ProjectStatus,
     last_opened_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TerminalAppearanceSettings {
+    preset: String,
+    font_size: u8,
+    line_height: f64,
+    background: String,
+    foreground: String,
+    cursor: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -61,23 +75,33 @@ struct TerminalExit {
     code: Option<i32>,
 }
 
+const MAX_PASTED_IMAGE_BYTES: usize = 25 * 1024 * 1024;
+
 #[derive(Default)]
 struct TerminalRegistry(Mutex<HashMap<String, TerminalSession>>);
 
 struct TerminalSession {
     project_id: Option<String>,
     child: Box<dyn PtyChild + Send>,
-    master: Box<dyn MasterPty + Send>,
-    writer: Box<dyn Write + Send>,
+    control_tx: mpsc::Sender<TerminalControl>,
+}
+
+enum TerminalControl {
+    Write(String),
+    Resize { cols: u16, rows: u16 },
+    Stop,
 }
 
 struct StateStore(Mutex<WorkbenchState>);
+
+struct InitialProjectId(Option<String>);
 
 impl Default for WorkbenchState {
     fn default() -> Self {
         Self {
             projects: Vec::new(),
             active_project_id: None,
+            terminal_appearance: None,
         }
     }
 }
@@ -85,6 +109,26 @@ impl Default for WorkbenchState {
 #[tauri::command]
 fn load_state(store: State<'_, StateStore>) -> Result<WorkbenchState, String> {
     Ok(store.0.lock().map_err(lock_error)?.clone())
+}
+
+#[tauri::command]
+fn initial_project_id(initial_project_id: State<'_, InitialProjectId>) -> Option<String> {
+    initial_project_id.0.clone()
+}
+
+#[tauri::command]
+fn set_terminal_appearance(
+    app: AppHandle,
+    store: State<'_, StateStore>,
+    appearance: TerminalAppearanceSettings,
+) -> Result<WorkbenchState, String> {
+    {
+        let mut state = store.0.lock().map_err(lock_error)?;
+        state.terminal_appearance = Some(normalize_terminal_appearance(appearance));
+        save_state_to_disk(&app, &state)?;
+    }
+
+    load_state(store)
 }
 
 #[tauri::command]
@@ -169,6 +213,36 @@ fn remove_project(
 }
 
 #[tauri::command]
+fn open_project_window(
+    app: AppHandle,
+    store: State<'_, StateStore>,
+    project_id: String,
+) -> Result<(), String> {
+    let project = {
+        let mut state = store.0.lock().map_err(lock_error)?;
+        let index = state
+            .projects
+            .iter()
+            .position(|project| project.id == project_id)
+            .ok_or_else(|| "项目不存在".to_string())?;
+
+        state.projects[index].last_opened_at = now_unix();
+        let project = state.projects[index].clone();
+        save_state_to_disk(&app, &state)?;
+        project
+    };
+
+    let executable = std::env::current_exe().map_err(|error| error.to_string())?;
+    Command::new(executable)
+        .arg("--project-id")
+        .arg(project.id)
+        .spawn()
+        .map_err(|error| format!("打开项目窗口失败：{error}"))?;
+
+    Ok(())
+}
+
+#[tauri::command]
 fn terminal_start(
     app: AppHandle,
     store: State<'_, StateStore>,
@@ -221,9 +295,38 @@ fn terminal_start(
         .take_writer()
         .map_err(|error| error.to_string())?;
     let master = pair.master;
+    let (control_tx, control_rx) = mpsc::channel::<TerminalControl>();
     let output_session_id = session_id.clone();
     let exit_session_id = session_id.clone();
     let app_for_thread = app.clone();
+
+    thread::spawn(move || {
+        let mut writer = writer;
+        let master = master;
+
+        while let Ok(message) = control_rx.recv() {
+            match message {
+                TerminalControl::Write(data) => {
+                    if writer
+                        .write_all(data.as_bytes())
+                        .and_then(|_| writer.flush())
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+                TerminalControl::Resize { cols, rows } => {
+                    let _ = master.resize(PtySize {
+                        rows: rows.max(8),
+                        cols: cols.max(20),
+                        pixel_width: 0,
+                        pixel_height: 0,
+                    });
+                }
+                TerminalControl::Stop => break,
+            }
+        }
+    });
 
     thread::spawn(move || {
         let mut buffer = [0_u8; 1024];
@@ -259,8 +362,7 @@ fn terminal_start(
             TerminalSession {
                 project_id,
                 child,
-                master,
-                writer,
+                control_tx,
             },
         );
     }
@@ -279,16 +381,17 @@ fn terminal_write(
     session_id: String,
     data: String,
 ) -> Result<(), String> {
-    let mut sessions = terminals.0.lock().map_err(lock_error)?;
-    let session = sessions
-        .get_mut(&session_id)
-        .ok_or_else(|| "终端会话不存在".to_string())?;
+    let control_tx = {
+        let sessions = terminals.0.lock().map_err(lock_error)?;
+        sessions
+            .get(&session_id)
+            .map(|session| session.control_tx.clone())
+            .ok_or_else(|| "终端会话不存在".to_string())?
+    };
 
-    session
-        .writer
-        .write_all(data.as_bytes())
-        .map_err(|error| error.to_string())?;
-    session.writer.flush().map_err(|error| error.to_string())
+    control_tx
+        .send(TerminalControl::Write(data))
+        .map_err(|_| "终端会话已关闭".to_string())
 }
 
 #[tauri::command]
@@ -298,25 +401,44 @@ fn terminal_resize(
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
-    let sessions = terminals.0.lock().map_err(lock_error)?;
-    let session = sessions
-        .get(&session_id)
-        .ok_or_else(|| "终端会话不存在".to_string())?;
+    let control_tx = {
+        let sessions = terminals.0.lock().map_err(lock_error)?;
+        sessions
+            .get(&session_id)
+            .map(|session| session.control_tx.clone())
+            .ok_or_else(|| "终端会话不存在".to_string())?
+    };
 
-    session
-        .master
-        .resize(PtySize {
-            rows: rows.max(8),
-            cols: cols.max(20),
-            pixel_width: 0,
-            pixel_height: 0,
-        })
-        .map_err(|error| error.to_string())
+    control_tx
+        .send(TerminalControl::Resize { cols, rows })
+        .map_err(|_| "终端会话已关闭".to_string())
 }
 
 #[tauri::command]
 fn terminal_stop(terminals: State<'_, TerminalRegistry>, session_id: String) -> Result<(), String> {
     stop_terminal_session(&terminals, &session_id)
+}
+
+#[tauri::command]
+fn save_pasted_image(mime_type: String, bytes: Vec<u8>) -> Result<String, String> {
+    if bytes.is_empty() {
+        return Err("剪贴板图片为空".into());
+    }
+    if bytes.len() > MAX_PASTED_IMAGE_BYTES {
+        return Err("剪贴板图片过大，无法临时保存".into());
+    }
+
+    let extension = pasted_image_extension(&mime_type)
+        .ok_or_else(|| format!("不支持的图片类型：{mime_type}"))?;
+    let dir = std::env::temp_dir()
+        .join("code-terminal")
+        .join("pasted-images");
+    fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+
+    let path = dir.join(format!("paste-{}.{}", Uuid::new_v4(), extension));
+    fs::write(&path, bytes).map_err(|error| error.to_string())?;
+
+    Ok(path_to_string(&path))
 }
 
 pub fn run() {
@@ -325,18 +447,23 @@ pub fn run() {
         .setup(|app| {
             let state = load_state_from_disk(&app.handle()).unwrap_or_default();
             app.manage(StateStore(Mutex::new(state)));
+            app.manage(InitialProjectId(initial_project_id_from_args()));
             app.manage(TerminalRegistry::default());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             load_state,
+            initial_project_id,
+            set_terminal_appearance,
             upsert_project,
             set_active_project,
             remove_project,
+            open_project_window,
             terminal_start,
             terminal_write,
             terminal_resize,
-            terminal_stop
+            terminal_stop,
+            save_pasted_image
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
@@ -351,8 +478,8 @@ pub fn run() {
                 });
 
                 if let Ok(terminal_sessions) = terminal_sessions {
-                    for mut session in terminal_sessions {
-                        let _ = session.child.kill();
+                    for session in terminal_sessions {
+                        stop_detached_terminal_session(session);
                     }
                 }
             }
@@ -519,8 +646,13 @@ fn stop_terminal_session(
     registry: &State<'_, TerminalRegistry>,
     session_id: &str,
 ) -> Result<(), String> {
-    if let Some(mut session) = registry.0.lock().map_err(lock_error)?.remove(session_id) {
-        let _ = session.child.kill();
+    let session = {
+        let mut sessions = registry.0.lock().map_err(lock_error)?;
+        sessions.remove(session_id)
+    };
+
+    if let Some(session) = session {
+        stop_detached_terminal_session(session);
     }
     Ok(())
 }
@@ -529,25 +661,118 @@ fn stop_terminals_for_project(
     registry: &State<'_, TerminalRegistry>,
     project_id: &str,
 ) -> Result<(), String> {
-    let mut sessions = registry.0.lock().map_err(lock_error)?;
-    let matching_session_ids = sessions
-        .iter()
-        .filter_map(|(session_id, session)| {
-            if session.project_id.as_deref() == Some(project_id) {
-                Some(session_id.clone())
-            } else {
-                None
-            }
-        })
-        .collect::<Vec<_>>();
+    let terminal_sessions = {
+        let mut sessions = registry.0.lock().map_err(lock_error)?;
+        let matching_session_ids = sessions
+            .iter()
+            .filter_map(|(session_id, session)| {
+                if session.project_id.as_deref() == Some(project_id) {
+                    Some(session_id.clone())
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
 
-    for session_id in matching_session_ids {
-        if let Some(mut session) = sessions.remove(&session_id) {
-            let _ = session.child.kill();
-        }
+        matching_session_ids
+            .into_iter()
+            .filter_map(|session_id| sessions.remove(&session_id))
+            .collect::<Vec<_>>()
+    };
+
+    for session in terminal_sessions {
+        stop_detached_terminal_session(session);
     }
 
     Ok(())
+}
+
+fn stop_detached_terminal_session(mut session: TerminalSession) {
+    let _ = session.control_tx.send(TerminalControl::Stop);
+    let _ = session.child.kill();
+}
+
+fn pasted_image_extension(mime_type: &str) -> Option<&'static str> {
+    match mime_type.to_ascii_lowercase().as_str() {
+        "image/png" => Some("png"),
+        "image/jpeg" | "image/jpg" => Some("jpg"),
+        "image/gif" => Some("gif"),
+        "image/webp" => Some("webp"),
+        "image/bmp" => Some("bmp"),
+        _ => None,
+    }
+}
+
+fn initial_project_id_from_args() -> Option<String> {
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        if arg == "--project-id" {
+            return args.next().filter(|value| !value.trim().is_empty());
+        }
+
+        if let Some(value) = arg.strip_prefix("--project-id=") {
+            if !value.trim().is_empty() {
+                return Some(value.to_string());
+            }
+        }
+    }
+
+    None
+}
+
+fn normalize_terminal_appearance(
+    appearance: TerminalAppearanceSettings,
+) -> TerminalAppearanceSettings {
+    TerminalAppearanceSettings {
+        preset: if is_terminal_theme_preset(&appearance.preset) {
+            appearance.preset
+        } else {
+            "custom".into()
+        },
+        font_size: appearance.font_size.clamp(10, 22),
+        line_height: clamp_terminal_line_height(appearance.line_height),
+        background: sanitize_hex_color(&appearance.background, "#070b10"),
+        foreground: sanitize_hex_color(&appearance.foreground, "#d7dde7"),
+        cursor: sanitize_hex_color(&appearance.cursor, "#8ab4ff"),
+    }
+}
+
+fn is_terminal_theme_preset(value: &str) -> bool {
+    matches!(
+        value,
+        "workbench"
+            | "daylight"
+            | "midnight"
+            | "ocean"
+            | "jade"
+            | "violet"
+            | "rose"
+            | "amber"
+            | "classic"
+            | "custom"
+    )
+}
+
+fn clamp_terminal_line_height(value: f64) -> f64 {
+    if !value.is_finite() {
+        return 1.28;
+    }
+
+    (value.clamp(1.0, 1.8) * 100.0).round() / 100.0
+}
+
+fn sanitize_hex_color(value: &str, fallback: &str) -> String {
+    if value.len() == 7
+        && value.starts_with('#')
+        && value
+            .chars()
+            .skip(1)
+            .all(|character| character.is_ascii_hexdigit())
+    {
+        value.to_string()
+    } else {
+        fallback.to_string()
+    }
 }
 
 fn resolve_terminal_cwd(

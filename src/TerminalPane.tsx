@@ -122,6 +122,14 @@ function resizeAdjacentWeights(startSizes: number[], index: number, delta: numbe
   return next;
 }
 
+function getAutoLayoutMode(tabCount: number): TerminalLayoutMode {
+  const count = Math.max(1, tabCount);
+  return (
+    terminalLayoutModes.find((layout) => layout.visibleCount >= count)?.mode ??
+    terminalLayoutModes[terminalLayoutModes.length - 1].mode
+  );
+}
+
 export function TerminalPane({
   activeProjectId,
   activeProjectPath,
@@ -338,25 +346,27 @@ export function TerminalPane({
   }
 
   function closeTerminalTab(tabId: string) {
+    if (terminalTabs.tabs.length <= 1) return;
+
+    const closingIndex = terminalTabs.tabs.findIndex((tab) => tab.id === tabId);
+    if (closingIndex < 0) return;
+
+    const tabs = terminalTabs.tabs.filter((tab) => tab.id !== tabId);
+    const fallbackTab = tabs[Math.max(0, closingIndex - 1)] ?? tabs[0];
+    const activeTabId = terminalTabs.activeTabId === tabId ? fallbackTab.id : terminalTabs.activeTabId;
+
+    void terminalHandlesRef.current[tabId]?.stopSession();
+
     setTabRuntime((current) => {
       const next = { ...current };
       delete next[tabId];
       return next;
     });
     setRoutedCommand((current) => (current?.tabId === tabId ? null : current));
+    setTerminalTabs({ tabs, activeTabId });
+    setLayoutMode(getAutoLayoutMode(tabs.length));
 
-    setTerminalTabs((current) => {
-      if (current.tabs.length <= 1) return current;
-
-      const closingIndex = current.tabs.findIndex((tab) => tab.id === tabId);
-      const tabs = current.tabs.filter((tab) => tab.id !== tabId);
-      const fallbackTab = tabs[Math.max(0, closingIndex - 1)] ?? tabs[0];
-
-      return {
-        tabs,
-        activeTabId: current.activeTabId === tabId ? fallbackTab.id : current.activeTabId,
-      };
-    });
+    window.setTimeout(() => scheduleVisibleTerminalFit(true), 0);
   }
 
   function restartActiveTerminal() {
@@ -508,6 +518,18 @@ export function TerminalPane({
                 <span className="terminal-cell-path" title={cwd || "未绑定项目目录"}>
                   {formatTerminalPath(cwd)}
                 </span>
+                {terminalTabs.tabs.length > 1 && (
+                  <button
+                    className="terminal-cell-close"
+                    title="关闭此终端"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      closeTerminalTab(tab.id);
+                    }}
+                  >
+                    <X size={12} />
+                  </button>
+                )}
               </div>
               <TerminalSessionView
                 ref={(handle) => {

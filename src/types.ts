@@ -11,15 +11,26 @@ export interface Project {
 export interface WorkbenchState {
   projects: Project[];
   activeProjectId?: string | null;
+  terminalAppearance?: TerminalAppearanceSettings | null;
 }
 
-export type BuiltInTerminalThemePreset = "workbench" | "daylight" | "midnight" | "classic";
+export type BuiltInTerminalThemePreset =
+  | "workbench"
+  | "daylight"
+  | "midnight"
+  | "ocean"
+  | "jade"
+  | "violet"
+  | "rose"
+  | "amber"
+  | "classic";
 export type TerminalThemePreset = BuiltInTerminalThemePreset | "custom";
 export type TerminalColorKey = "background" | "foreground" | "cursor";
 
 export interface TerminalAppearanceSettings {
   preset: TerminalThemePreset;
   fontSize: number;
+  lineHeight: number;
   background: string;
   foreground: string;
   cursor: string;

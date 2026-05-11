@@ -15,11 +15,12 @@ import type {
 
 const outputChunkSize = 4096;
 const outputCursorRevealDelayMs = 2400;
-const terminalCursorHiddenSequence = "\x1b[?12l\x1b[?25l";
-const terminalCursorVisibleSequence = "\x1b[?12l\x1b[?25h";
-const cursorPrivateModeParams = new Set([12, 25]);
 const resizeDebounceMs = 40;
 const resizeSettleDelays = [80, 180, 360];
+
+interface SavedPastedImage {
+  path: string;
+}
 
 export interface TerminalSessionRuntime {
   session: TerminalStarted | null;
@@ -76,7 +77,6 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     const outputWriterActiveRef = useRef(false);
     const outputCursorTimerRef = useRef<number | null>(null);
     const outputCursorSuppressedRef = useRef(false);
-    const alternateScreenActiveRef = useRef(false);
     const lastResizeRef = useRef<{ cols: number; rows: number } | null>(null);
     const [session, setSession] = useState<TerminalStarted | null>(null);
     const [isStarting, setIsStarting] = useState(false);
@@ -103,7 +103,6 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         window.clearTimeout(outputCursorTimerRef.current);
         outputCursorTimerRef.current = null;
       }
-      alternateScreenActiveRef.current = false;
       hostRef.current?.classList.remove("terminal-tui-active");
       setOutputCursorSuppressed(false);
     }
@@ -114,36 +113,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     }
 
     function syncCursorSuppressionClass() {
-      const suppressed = outputCursorSuppressedRef.current || alternateScreenActiveRef.current;
-      hostRef.current?.classList.toggle("terminal-output-streaming", suppressed);
-    }
-
-    function setAlternateScreenActive(active: boolean) {
-      if (alternateScreenActiveRef.current === active) return;
-
-      alternateScreenActiveRef.current = active;
-      hostRef.current?.classList.toggle("terminal-tui-active", active);
-      syncCursorSuppressionClass();
-
-      if (active) {
-        terminalRef.current?.write(terminalCursorHiddenSequence);
-      } else if (!outputCursorSuppressedRef.current) {
-        terminalRef.current?.write(terminalCursorVisibleSequence);
-      }
-    }
-
-    function shouldGuardCursorControl() {
-      return outputCursorSuppressedRef.current || alternateScreenActiveRef.current;
-    }
-
-    function csiParamsInclude(params: (number | number[])[], values: Set<number>) {
-      return params.some((param) => {
-        if (Array.isArray(param)) {
-          return param.some((subParam) => values.has(subParam));
-        }
-
-        return values.has(param);
-      });
+      hostRef.current?.classList.toggle("terminal-output-streaming", outputCursorSuppressedRef.current);
     }
 
     function suppressCursorDuringOutput() {
@@ -167,9 +137,6 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         outputCursorTimerRef.current = null;
         if (outputWriterActiveRef.current || outputQueueRef.current.length > 0) return;
         setOutputCursorSuppressed(false);
-        if (!alternateScreenActiveRef.current) {
-          terminalRef.current?.write(terminalCursorVisibleSequence);
-        }
       }, outputCursorRevealDelayMs);
     }
 
@@ -179,9 +146,6 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         outputCursorTimerRef.current = null;
       }
       setOutputCursorSuppressed(false);
-      if (!alternateScreenActiveRef.current) {
-        terminalRef.current?.write(terminalCursorVisibleSequence);
-      }
     }
 
     function pumpTerminalOutput() {
@@ -194,7 +158,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         return;
       }
 
-      terminal.write(`${next}${terminalCursorHiddenSequence}`, pumpTerminalOutput);
+      terminal.write(next, pumpTerminalOutput);
     }
 
     function enqueueTerminalOutput(data: string) {
@@ -209,6 +173,62 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         outputWriterActiveRef.current = true;
         pumpTerminalOutput();
       }
+    }
+
+    function normalizePastedText(text: string) {
+      return text.replace(/\r?\n/g, "\r");
+    }
+
+    function writeTerminalInput(data: string) {
+      const sessionId = sessionIdRef.current;
+      if (!sessionId || !data) return;
+
+      revealCursorForInput();
+      invoke("terminal_write", {
+        sessionId,
+        data: normalizePastedText(data),
+      }).catch(reportTerminalError);
+    }
+
+    async function pasteFromClipboard() {
+      try {
+        const text = await navigator.clipboard?.readText();
+        writeTerminalInput(text || "");
+      } catch {
+        // The browser paste event usually follows Ctrl+V; clipboard API can be denied by the webview.
+      }
+    }
+
+    function isPasteShortcut(event: KeyboardEvent) {
+      const key = event.key.toLowerCase();
+      return (
+        ((event.ctrlKey || event.metaKey) && !event.altKey && key === "v") ||
+        (event.shiftKey && !event.ctrlKey && !event.metaKey && key === "insert")
+      );
+    }
+
+    function getClipboardImageItem(dataTransfer: DataTransfer | null) {
+      if (!dataTransfer) return null;
+
+      const items = Array.from(dataTransfer.items);
+      return items.find((item) => item.kind === "file" && item.type.startsWith("image/")) ?? null;
+    }
+
+    async function saveClipboardImage(item: DataTransferItem) {
+      const file = item.getAsFile();
+      if (!file) return null;
+
+      const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
+      const path = await invoke<string>("save_pasted_image", {
+        mimeType: file.type || item.type,
+        bytes,
+      });
+
+      return path;
+    }
+
+    function formatPastedImagePath(path: string) {
+      return `"${path.replace(/"/g, '\\"')}"`;
     }
 
     async function stopSession() {
@@ -413,7 +433,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         cursorStyle: "underline",
         fontFamily: '"Cascadia Mono", "Cascadia Code", "JetBrains Mono", Consolas, "SFMono-Regular", monospace',
         fontSize: appearance.fontSize,
-        lineHeight: 1.28,
+        lineHeight: appearance.lineHeight,
         smoothScrollDuration: 0,
         scrollback: 4000,
         theme: getXtermTheme(appearance),
@@ -427,16 +447,8 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       scheduleFitAndResize();
 
       const bufferDisposable = terminal.buffer.onBufferChange((buffer) => {
-        setAlternateScreenActive(buffer.type === "alternate");
+        host.classList.toggle("terminal-tui-active", buffer.type === "alternate");
       });
-      const cursorModeDisposable = terminal.parser.registerCsiHandler(
-        { prefix: "?", final: "h" },
-        (params) => shouldGuardCursorControl() && csiParamsInclude(params, cursorPrivateModeParams),
-      );
-      const cursorStyleDisposable = terminal.parser.registerCsiHandler(
-        { intermediates: " ", final: "q" },
-        () => shouldGuardCursorControl(),
-      );
 
       const dataDisposable = terminal.onData((data) => {
         const sessionId = sessionIdRef.current;
@@ -444,6 +456,36 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         revealCursorForInput();
         invoke("terminal_write", { sessionId, data }).catch(reportTerminalError);
       });
+      terminal.attachCustomKeyEventHandler((event) => {
+        if (!isPasteShortcut(event)) return true;
+        if (event.type === "keydown") {
+          void pasteFromClipboard();
+        }
+        return false;
+      });
+
+      const pasteListener = (event: ClipboardEvent) => {
+        const imageItem = getClipboardImageItem(event.clipboardData);
+        if (imageItem) {
+          event.preventDefault();
+          event.stopPropagation();
+          void saveClipboardImage(imageItem)
+            .then((path) => {
+              if (path) writeTerminalInput(formatPastedImagePath(path));
+            })
+            .catch(reportTerminalError);
+          return;
+        }
+
+        const text = event.clipboardData?.getData("text/plain");
+        if (!text) return;
+
+        event.preventDefault();
+        event.stopPropagation();
+        writeTerminalInput(text);
+      };
+      host.addEventListener("paste", pasteListener);
+      terminal.textarea?.addEventListener("paste", pasteListener);
 
       const resizeObserver = new ResizeObserver(() => {
         scheduleFitAndResize();
@@ -473,9 +515,10 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         window.removeEventListener("resize", scheduleFitAndResize);
         document.removeEventListener("fullscreenchange", scheduleFitAndResize);
         window.visualViewport?.removeEventListener("resize", scheduleFitAndResize);
+        host.removeEventListener("paste", pasteListener);
+        terminal.textarea?.removeEventListener("paste", pasteListener);
+        terminal.attachCustomKeyEventHandler(() => true);
         bufferDisposable.dispose();
-        cursorModeDisposable.dispose();
-        cursorStyleDisposable.dispose();
         dataDisposable.dispose();
         unlistenOutput.then((unlisten) => unlisten());
         unlistenExit.then((unlisten) => unlisten());
@@ -494,6 +537,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
 
       terminal.options.theme = getXtermTheme(appearance);
       terminal.options.fontSize = appearance.fontSize;
+      terminal.options.lineHeight = appearance.lineHeight;
       scheduleFitAndResize();
     }, [appearance]);
 
