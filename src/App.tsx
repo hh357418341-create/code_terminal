@@ -13,7 +13,7 @@ import {
   SquareTerminal,
   Trash2,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { TerminalPane } from "./TerminalPane";
 import {
   clampTerminalFontSize,
@@ -108,6 +108,7 @@ export function App() {
   );
   const [fontSizeInput, setFontSizeInput] = useState(() => String(terminalAppearance.fontSize));
   const [lineHeightInput, setLineHeightInput] = useState(() => terminalAppearance.lineHeight.toFixed(2));
+  const projectListRef = useRef<HTMLElement | null>(null);
 
   const activeProject = useMemo(
     () => state.projects.find((project) => project.id === state.activeProjectId) ?? null,
@@ -202,6 +203,38 @@ export function App() {
     getCurrentWindow().setTitle(title).catch(() => undefined);
   }, [currentProject?.name]);
 
+  useEffect(() => {
+    if (!draggedProjectId) return;
+
+    const handlePointerMove = (event: PointerEvent) => {
+      event.preventDefault();
+      setProjectDropTarget(getProjectDropTarget(event.clientY));
+    };
+    const handlePointerUp = (event: PointerEvent) => {
+      event.preventDefault();
+      const target = getProjectDropTarget(event.clientY);
+      if (target) {
+        void finishProjectDrag(draggedProjectId, target.id, target.placement);
+      } else {
+        setDraggedProjectId(null);
+        setProjectDropTarget(null);
+      }
+    };
+    const handlePointerCancel = () => {
+      setDraggedProjectId(null);
+      setProjectDropTarget(null);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointercancel", handlePointerCancel);
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerCancel);
+    };
+  }, [draggedProjectId, state.projects]);
+
   async function chooseProject() {
     setError(null);
     const selected = await open({ directory: true, multiple: false });
@@ -254,18 +287,45 @@ export function App() {
     setState(applyWindowProject(updated));
   }
 
-  function getProjectDropPlacement(event: React.DragEvent<HTMLElement>): ProjectDropPlacement {
-    const rect = event.currentTarget.getBoundingClientRect();
-    return event.clientY > rect.top + rect.height / 2 ? "after" : "before";
+  function getProjectDropTarget(clientY: number) {
+    const projectList = projectListRef.current;
+    if (!projectList) return null;
+
+    const projectElements = Array.from(
+      projectList.querySelectorAll<HTMLElement>(".project-item[data-project-id]"),
+    ).filter((element) => element.dataset.projectId && element.dataset.projectId !== draggedProjectId);
+    if (projectElements.length === 0) return null;
+
+    for (const element of projectElements) {
+      const rect = element.getBoundingClientRect();
+      if (clientY >= rect.top && clientY <= rect.bottom) {
+        return {
+          id: element.dataset.projectId as string,
+          placement: clientY > rect.top + rect.height / 2 ? "after" : "before",
+        } satisfies { id: string; placement: ProjectDropPlacement };
+      }
+    }
+
+    const firstElement = projectElements[0];
+    const lastElement = projectElements[projectElements.length - 1];
+    if (clientY < firstElement.getBoundingClientRect().top) {
+      return { id: firstElement.dataset.projectId as string, placement: "before" as const };
+    }
+
+    return { id: lastElement.dataset.projectId as string, placement: "after" as const };
   }
 
-  async function finishProjectDrag(targetProjectId: string, placement: ProjectDropPlacement) {
-    if (!draggedProjectId) return;
-
+  async function finishProjectDrag(
+    sourceProjectId: string,
+    targetProjectId: string,
+    placement: ProjectDropPlacement,
+  ) {
+    setDraggedProjectId(null);
     setProjectDropTarget(null);
-    if (draggedProjectId === targetProjectId) return;
 
-    const orderedProjects = moveProject(state.projects, draggedProjectId, targetProjectId, placement);
+    if (sourceProjectId === targetProjectId) return;
+
+    const orderedProjects = moveProject(state.projects, sourceProjectId, targetProjectId, placement);
     if (orderedProjects === state.projects) return;
 
     setState((current) => ({
@@ -278,6 +338,15 @@ export function App() {
       setError(String(err));
       void loadState().catch((loadError) => setError(String(loadError)));
     }
+  }
+
+  function startProjectDrag(projectId: string, event: React.PointerEvent<HTMLButtonElement>) {
+    if (event.button !== 0) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    setDraggedProjectId(projectId);
+    setProjectDropTarget(null);
   }
 
   async function removeProject(projectId: string) {
@@ -404,7 +473,11 @@ export function App() {
           </button>
         </div>
 
-        <nav className="project-list" aria-label="项目列表">
+        <nav
+          className={`project-list ${draggedProjectId ? "dragging" : ""}`}
+          ref={projectListRef}
+          aria-label="项目列表"
+        >
           {state.projects.length === 0 ? (
             <button className="empty-project-button" onClick={chooseProject}>
               打开一个项目目录
@@ -413,42 +486,18 @@ export function App() {
             state.projects.map((project) => (
               <div
                 key={project.id}
+                data-project-id={project.id}
                 className={`project-item ${project.id === currentProject?.id ? "active" : ""} ${
                   project.id === draggedProjectId ? "dragging" : ""
                 } ${
                   projectDropTarget?.id === project.id ? `drag-over ${projectDropTarget.placement}` : ""
                 }`}
                 title={project.path}
-                onDragEnter={(event) => {
-                  event.preventDefault();
-                  if (draggedProjectId && draggedProjectId !== project.id) {
-                    setProjectDropTarget({ id: project.id, placement: getProjectDropPlacement(event) });
-                  }
-                }}
-                onDragOver={(event) => {
-                  if (!draggedProjectId || draggedProjectId === project.id) return;
-                  event.preventDefault();
-                  event.dataTransfer.dropEffect = "move";
-                  setProjectDropTarget({ id: project.id, placement: getProjectDropPlacement(event) });
-                }}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  void finishProjectDrag(project.id, getProjectDropPlacement(event));
-                }}
               >
                 <button
                   className="project-drag-handle"
-                  draggable
                   title="拖动调整项目顺序"
-                  onDragStart={(event) => {
-                    setDraggedProjectId(project.id);
-                    event.dataTransfer.effectAllowed = "move";
-                    event.dataTransfer.setData("text/plain", project.id);
-                  }}
-                  onDragEnd={() => {
-                    setDraggedProjectId(null);
-                    setProjectDropTarget(null);
-                  }}
+                  onPointerDown={(event) => startProjectDrag(project.id, event)}
                 >
                   <GripVertical size={14} />
                 </button>

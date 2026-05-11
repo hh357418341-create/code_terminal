@@ -179,6 +179,11 @@ input {
   scrollbar-color: color-mix(in srgb, var(--app-muted, #697482) 34%, transparent) transparent;
 }
 
+.project-list.dragging {
+  cursor: grabbing;
+  user-select: none;
+}
+
 .project-list::-webkit-scrollbar {
   width: 8px;
 }
@@ -241,6 +246,7 @@ input {
   background: transparent;
   cursor: grab;
   opacity: 0.72;
+  touch-action: none;
 }
 
 .project-drag-handle:active {
