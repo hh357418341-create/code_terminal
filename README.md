@@ -8,6 +8,13 @@
 
 ![Code Terminal preview](docs/code-terminal-preview.png)
 
+## 下载
+
+- [下载 Windows exe](https://github.com/hh357418341-create/code_terminal/releases/download/app-v0.1.0/code-terminal.exe)
+- [查看所有发布文件](https://github.com/hh357418341-create/code_terminal/releases/tag/app-v0.1.0)
+
+当前公开下载优先提供 Windows 版本；macOS / Linux 版本仍在验证中。
+
 ## 平台状态
 
 - **Windows**：主力支持平台，当前优先打磨和发布。
@@ -64,7 +71,7 @@ Windows MSI 打包会下载 WiX 工具链，网络较慢时可能需要重试。
 仓库包含 GitHub Actions 工作流：
 
 - `CI`：在 push 和 pull request 时检查前端构建，并在 Windows、macOS、Linux 上运行 Rust backend `cargo check`。
-- `Release`：手动触发或推送 `app-v*` tag 时构建三平台安装产物，并创建 draft prerelease，方便检查后再公开发布。
+- `Release`：手动触发或推送 `app-v*` tag 时构建 Windows 安装产物和便携 exe，并创建 draft prerelease，方便检查后再公开发布。
 
 发布一个版本可以这样操作：
 

@@ -10,41 +10,12 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    name: Build ${{ matrix.name }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            name: Windows
-            args: ""
-          - os: macos-latest
-            name: macOS Apple Silicon
-            args: "--target aarch64-apple-darwin"
-            rustTargets: "aarch64-apple-darwin,x86_64-apple-darwin"
-          - os: macos-latest
-            name: macOS Intel
-            args: "--target x86_64-apple-darwin"
-            rustTargets: "aarch64-apple-darwin,x86_64-apple-darwin"
-          - os: ubuntu-22.04
-            name: Linux
-            args: ""
-            rustTargets: ""
-    runs-on: ${{ matrix.os }}
+  build-windows:
+    name: Build Windows
+    runs-on: windows-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Install Linux system dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libappindicator3-dev \
-            librsvg2-dev \
-            patchelf
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -54,8 +25,6 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.rustTargets }}
 
       - name: Cache Rust
         uses: Swatinem/rust-cache@v2
@@ -81,4 +50,11 @@ jobs:
             - Linux: experimental build; distro dependencies may vary.
           releaseDraft: true
           prerelease: true
-          args: ${{ matrix.args }}
+
+      - name: Upload portable Windows exe
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          draft: true
+          prerelease: true
+          files: src-tauri/target/release/code-terminal.exe
