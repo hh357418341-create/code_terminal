@@ -4,6 +4,10 @@
 
 > Built with Tauri, React, TypeScript, Rust and xterm.js.
 
+## 界面预览
+
+![Code Terminal preview](docs/code-terminal-preview.png)
+
 ## 适合谁
 
 - 经常在多个项目之间来回切换，需要快速打开不同项目终端的人

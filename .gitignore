@@ -1,5 +1,6 @@
 node_modules
 .opencode-workbench
+.playwright-cli
 src-tauri/target
 src-tauri/target-*
 src-tauri/gen
