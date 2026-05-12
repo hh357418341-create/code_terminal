@@ -201,7 +201,7 @@ input {
 
 .project-item {
   display: grid;
-  grid-template-columns: 20px minmax(0, 1fr) auto 28px;
+  grid-template-columns: 20px 28px minmax(0, 1fr) auto 28px;
   align-items: center;
   gap: 8px;
   width: 100%;
@@ -260,9 +260,7 @@ input {
 
 .project-select {
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
   align-items: center;
-  gap: 10px;
   min-width: 0;
   min-height: 56px;
   padding: 0;
@@ -272,8 +270,29 @@ input {
   cursor: pointer;
 }
 
+.project-folder-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  color: var(--app-soft);
+  background: transparent;
+  border-radius: 7px;
+  cursor: pointer;
+  transition:
+    background 140ms ease,
+    color 140ms ease,
+    opacity 140ms ease;
+}
+
 .project-item-icon {
   color: var(--app-soft);
+}
+
+.project-folder-button:hover {
+  color: var(--app-text);
+  background: color-mix(in srgb, var(--terminal-fg, #d8e1e8) 13%, transparent);
 }
 
 .project-item:hover {
@@ -289,6 +308,10 @@ input {
 }
 
 .project-item.active .project-item-icon {
+  color: var(--terminal-accent, #8ab4ff);
+}
+
+.project-item.active .project-folder-button {
   color: var(--terminal-accent, #8ab4ff);
 }
 

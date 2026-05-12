@@ -290,6 +290,26 @@ fn open_project_window(
 }
 
 #[tauri::command]
+fn open_project_folder(store: State<'_, StateStore>, project_id: String) -> Result<(), String> {
+    let path = {
+        let state = store.0.lock().map_err(lock_error)?;
+        let project = state
+            .projects
+            .iter()
+            .find(|project| project.id == project_id)
+            .ok_or_else(|| "项目不存在".to_string())?;
+
+        let path = PathBuf::from(&project.path);
+        if !path.exists() || !path.is_dir() {
+            return Err("项目路径不存在".into());
+        }
+        canonicalize_clean(&path)?
+    };
+
+    reveal_folder(&path)
+}
+
+#[tauri::command]
 fn terminal_start(
     app: AppHandle,
     store: State<'_, StateStore>,
@@ -514,6 +534,7 @@ pub fn run() {
             reorder_projects,
             remove_project,
             open_project_window,
+            open_project_folder,
             terminal_start,
             terminal_write,
             terminal_resize,
@@ -863,6 +884,33 @@ fn resolve_terminal_cwd(
     std::env::current_dir()
         .map_err(|error| error.to_string())
         .map(clean_windows_verbatim_path)
+}
+
+#[cfg(windows)]
+fn reveal_folder(path: &Path) -> Result<(), String> {
+    Command::new("explorer.exe")
+        .arg(path)
+        .spawn()
+        .map_err(|error| format!("打开项目目录失败：{error}"))?;
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn reveal_folder(path: &Path) -> Result<(), String> {
+    Command::new("open")
+        .arg(path)
+        .spawn()
+        .map_err(|error| format!("打开项目目录失败：{error}"))?;
+    Ok(())
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn reveal_folder(path: &Path) -> Result<(), String> {
+    Command::new("xdg-open")
+        .arg(path)
+        .spawn()
+        .map_err(|error| format!("打开项目目录失败：{error}"))?;
+    Ok(())
 }
 
 #[cfg(windows)]

@@ -100,6 +100,7 @@ export function App() {
     placement: ProjectDropPlacement;
   } | null>(null);
   const [openingProjectWindowId, setOpeningProjectWindowId] = useState<string | null>(null);
+  const [openingProjectFolderId, setOpeningProjectFolderId] = useState<string | null>(null);
   const [terminalAppearance, setTerminalAppearance] = useState<TerminalAppearanceSettings>(
     readStoredTerminalAppearance,
   );
@@ -374,6 +375,20 @@ export function App() {
     }
   }
 
+  async function openProjectFolder(projectId: string) {
+    setError(null);
+    if (openingProjectFolderId) return;
+
+    setOpeningProjectFolderId(projectId);
+    try {
+      await invoke("open_project_folder", { projectId });
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setOpeningProjectFolderId(null);
+    }
+  }
+
   function applyThemePreset(preset: BuiltInTerminalThemePreset) {
     updateTerminalAppearance((current) => getTerminalPresetAppearance(preset, current.fontSize, current.lineHeight));
   }
@@ -502,11 +517,19 @@ export function App() {
                   <GripVertical size={14} />
                 </button>
                 <button
+                  className="project-folder-button"
+                  disabled={openingProjectFolderId === project.id}
+                  title="在文件管理器中打开目录"
+                  aria-label={`打开 ${project.name} 目录`}
+                  onClick={() => openProjectFolder(project.id)}
+                >
+                  <FolderOpen className="project-item-icon" size={15} />
+                </button>
+                <button
                   className="project-select"
                   title={project.path}
                   onClick={() => setActive(project.id)}
                 >
-                  <FolderOpen className="project-item-icon" size={15} />
                   <span className="project-copy">
                     <span className="project-title">{project.name}</span>
                     <span className="project-path">{project.path}</span>
