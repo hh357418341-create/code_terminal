@@ -70,6 +70,7 @@ type TerminalTileArrangement =
   | { kind: "auto" }
   | { kind: "columns" }
   | { kind: "rows" }
+  | { kind: "rowSplit"; bottomTabIds: string[] }
   | {
       kind: "columnStack";
       anchorTabId: string;
@@ -104,6 +105,7 @@ const dockZoneLabels: Record<TerminalDockZone, string> = {
   left: "停靠到左侧",
   center: "移到此处",
 };
+const surfaceDockTargetId = "__surface__";
 
 function projectTitle(name?: string | null, index?: number) {
   const trimmedName = name?.trim();
@@ -248,6 +250,16 @@ function getGridLayout(preferences: TerminalLayoutPreferences, tabCount: number)
     };
   }
 
+  if (preferences.tileArrangement.kind === "rowSplit" && visibleCount >= 3) {
+    const bottomCount = Math.min(visibleCount - 1, Math.max(1, preferences.tileArrangement.bottomTabIds.length));
+    return {
+      ...preferences,
+      rows: 2,
+      columns: Math.max(visibleCount - bottomCount, bottomCount),
+      visibleCount,
+    };
+  }
+
   return {
     ...preferences,
     rows: 1,
@@ -261,7 +273,34 @@ function getGridCellStyle(
   visibleTabs: TerminalTab[],
   layout: TerminalGridLayout,
 ): CSSProperties | undefined {
-  if (layout.displayMode !== "tiles" || layout.tileArrangement.kind !== "columnStack") {
+  if (layout.displayMode !== "tiles") {
+    return undefined;
+  }
+
+  if (layout.tileArrangement.kind === "rowSplit") {
+    const bottomTabIdSet = new Set(layout.tileArrangement.bottomTabIds);
+    const visibleBottomTabs = visibleTabs.filter((tab) => bottomTabIdSet.has(tab.id));
+    if (layout.visibleCount < 3 || visibleBottomTabs.length === 0) {
+      return undefined;
+    }
+
+    const bottomTabs = visibleBottomTabs.length >= layout.visibleCount ? [visibleBottomTabs[0]] : visibleBottomTabs;
+    const topTabs = visibleTabs.filter((tab) => !bottomTabs.some((bottomTab) => bottomTab.id === tab.id));
+    const isBottomTab = bottomTabs.some((tab) => tab.id === tabId);
+    const rowTabs = isBottomTab ? bottomTabs : topTabs;
+    const index = rowTabs.findIndex((tab) => tab.id === tabId);
+    if (index < 0) return undefined;
+
+    const span = Math.max(1, Math.floor(layout.columns / rowTabs.length));
+    const start = index * span + 1;
+    const end = index === rowTabs.length - 1 ? -1 : start + span;
+    return {
+      gridColumn: end === -1 ? `${start} / -1` : `${start} / ${end}`,
+      gridRow: isBottomTab ? "2" : "1",
+    };
+  }
+
+  if (layout.tileArrangement.kind !== "columnStack") {
     return undefined;
   }
 
@@ -452,8 +491,23 @@ export function TerminalPane({
   }
 
   function getDockTarget(clientX: number, clientY: number, draggedTabId: string): TerminalDockTarget | null {
+    const surface = terminalSurfaceRef.current;
+    if (surface && activeLayout.displayMode === "tiles" && activeLayout.visibleCount >= 3) {
+      const surfaceRect = surface.getBoundingClientRect();
+      const isInsideSurface =
+        clientX >= surfaceRect.left &&
+        clientX <= surfaceRect.right &&
+        clientY >= surfaceRect.top &&
+        clientY <= surfaceRect.bottom;
+      if (isInsideSurface) {
+        const yRatio = (clientY - surfaceRect.top) / Math.max(1, surfaceRect.height);
+        if (yRatio < 0.18) return { tabId: surfaceDockTargetId, zone: "top" };
+        if (yRatio > 0.82) return { tabId: surfaceDockTargetId, zone: "bottom" };
+      }
+    }
+
     const elements = Array.from(
-      terminalSurfaceRef.current?.querySelectorAll<HTMLElement>(".terminal-cell.visible[data-tab-id]") ?? [],
+      surface?.querySelectorAll<HTMLElement>(".terminal-cell.visible[data-tab-id]") ?? [],
     );
 
     for (const element of elements) {
@@ -481,11 +535,18 @@ export function TerminalPane({
     if (draggedTabId === target.tabId) return current;
 
     const draggedIndex = current.findIndex((tab) => tab.id === draggedTabId);
-    const targetIndex = current.findIndex((tab) => tab.id === target.tabId);
-    if (draggedIndex < 0 || targetIndex < 0) return current;
+    if (draggedIndex < 0) return current;
 
     const tabs = [...current];
     const [draggedTab] = tabs.splice(draggedIndex, 1);
+    if (target.tabId === surfaceDockTargetId) {
+      const insertIndex = target.zone === "top" ? 0 : tabs.length;
+      tabs.splice(insertIndex, 0, draggedTab);
+      return tabs;
+    }
+
+    if (!tabs.some((tab) => tab.id === target.tabId)) return current;
+
     const nextTargetIndex = tabs.findIndex((tab) => tab.id === target.tabId);
     const insertIndex = target.zone === "right" || target.zone === "bottom" ? nextTargetIndex + 1 : nextTargetIndex;
     tabs.splice(insertIndex, 0, draggedTab);
@@ -493,6 +554,27 @@ export function TerminalPane({
   }
 
   function getArrangementForDock(draggedTabId: string, target: TerminalDockTarget): TerminalTileArrangement {
+    if (target.tabId === surfaceDockTargetId && (target.zone === "top" || target.zone === "bottom")) {
+      if (target.zone === "top") {
+        return {
+          kind: "rowSplit",
+          bottomTabIds: terminalTabs.tabs
+            .filter((tab) => tab.id !== draggedTabId)
+            .map((tab) => tab.id),
+        };
+      }
+
+      const currentArrangement = layoutPreferences.tileArrangement;
+      const currentBottomTabIds =
+        currentArrangement.kind === "rowSplit" ? currentArrangement.bottomTabIds : [];
+      const maxBottomCount = Math.max(1, Math.min(maxVisibleTerminals, terminalTabs.tabs.length) - 1);
+      const bottomTabIds = [
+        ...currentBottomTabIds.filter((tabId) => tabId !== draggedTabId),
+        draggedTabId,
+      ].slice(-maxBottomCount);
+      return { kind: "rowSplit", bottomTabIds };
+    }
+
     if (target.zone === "top" || target.zone === "bottom") {
       return {
         kind: "columnStack",
@@ -900,6 +982,11 @@ export function TerminalPane({
             </div>
           );
         })}
+        {dockTarget?.tabId === surfaceDockTargetId && (
+          <div className={`terminal-surface-dock-preview ${dockTarget.zone}`}>
+            {dockZoneLabels[dockTarget.zone]}
+          </div>
+        )}
         {activeLayout.columns > 1 &&
           columnWeights.slice(0, -1).map((_, index) => (
             <div
