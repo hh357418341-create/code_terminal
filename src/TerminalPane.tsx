@@ -98,6 +98,10 @@ const defaultLayoutPreferences: TerminalLayoutPreferences = {
   displayMode: "tiles",
   tileArrangement: { kind: "auto" },
 };
+const tileDragActivationDistance = 16;
+const surfaceDockEdgeRatio = 0.14;
+const tileDockEdgeRatio = 0.22;
+const bottomRowJoinRatio = 0.5;
 const dockZoneLabels: Record<TerminalDockZone, string> = {
   top: "停靠到上方",
   right: "停靠到右侧",
@@ -256,6 +260,17 @@ function getGridLayout(preferences: TerminalLayoutPreferences, tabCount: number)
       ...preferences,
       rows: 2,
       columns: Math.max(visibleCount - bottomCount, bottomCount),
+      visibleCount,
+    };
+  }
+
+  if (preferences.tileArrangement.kind === "auto" && visibleCount >= 4) {
+    const columns = Math.ceil(Math.sqrt(visibleCount));
+    const rows = Math.ceil(visibleCount / columns);
+    return {
+      ...preferences,
+      rows,
+      columns,
       visibleCount,
     };
   }
@@ -501,8 +516,8 @@ export function TerminalPane({
         clientY <= surfaceRect.bottom;
       if (isInsideSurface) {
         const yRatio = (clientY - surfaceRect.top) / Math.max(1, surfaceRect.height);
-        if (yRatio < 0.18) return { tabId: surfaceDockTargetId, zone: "top" };
-        if (yRatio > 0.82) return { tabId: surfaceDockTargetId, zone: "bottom" };
+        if (yRatio < surfaceDockEdgeRatio) return { tabId: surfaceDockTargetId, zone: "top" };
+        if (yRatio > 1 - surfaceDockEdgeRatio) return { tabId: surfaceDockTargetId, zone: "bottom" };
       }
     }
 
@@ -521,10 +536,18 @@ export function TerminalPane({
 
       const xRatio = (clientX - rect.left) / Math.max(1, rect.width);
       const yRatio = (clientY - rect.top) / Math.max(1, rect.height);
-      if (yRatio < 0.28) return { tabId, zone: "top" };
-      if (yRatio > 0.72) return { tabId, zone: "bottom" };
-      if (xRatio < 0.24) return { tabId, zone: "left" };
-      if (xRatio > 0.76) return { tabId, zone: "right" };
+      if (
+        activeLayout.tileArrangement.kind === "rowSplit" &&
+        activeLayout.tileArrangement.bottomTabIds.includes(tabId) &&
+        yRatio > bottomRowJoinRatio
+      ) {
+        return { tabId: surfaceDockTargetId, zone: "bottom" };
+      }
+
+      if (yRatio < tileDockEdgeRatio) return { tabId, zone: "top" };
+      if (yRatio > 1 - tileDockEdgeRatio) return { tabId, zone: "bottom" };
+      if (xRatio < tileDockEdgeRatio) return { tabId, zone: "left" };
+      if (xRatio > 1 - tileDockEdgeRatio) return { tabId, zone: "right" };
       return { tabId, zone: "center" };
     }
 
@@ -628,7 +651,7 @@ export function TerminalPane({
     event.preventDefault();
     const deltaX = Math.abs(event.clientX - drag.startClientX);
     const deltaY = Math.abs(event.clientY - drag.startClientY);
-    if (!drag.dragging && Math.max(deltaX, deltaY) < 8) return;
+    if (!drag.dragging && Math.max(deltaX, deltaY) < tileDragActivationDistance) return;
 
     const target = getDockTarget(event.clientX, event.clientY, drag.tabId);
     tileDragRef.current = {
@@ -912,13 +935,15 @@ export function TerminalPane({
           const runtime = tabRuntime[tab.id];
           const { status, label } = getTerminalRuntimeStatus(runtime);
           const cwd = runtime?.session?.cwd || tab.projectPath;
+          const tabDockTarget = dockTarget?.tabId === tab.id ? dockTarget : null;
+          const shouldShowDockCue = Boolean(tabDockTarget && tabDockTarget.zone !== "center");
 
           return (
             <div
               className={`terminal-cell ${tab.id === terminalTabs.activeTabId ? "active" : ""} ${
                 visibleTabIds.has(tab.id) ? "visible" : ""
               } ${tileDragRef.current?.tabId === tab.id ? "dragging" : ""} ${
-                dockTarget?.tabId === tab.id ? `dock-target dock-${dockTarget.zone}` : ""
+                shouldShowDockCue ? `dock-target dock-${tabDockTarget?.zone}` : ""
               }`}
               data-tab-id={tab.id}
               key={tab.id}
@@ -958,8 +983,8 @@ export function TerminalPane({
                     <X size={12} />
                   </button>
                 )}
-                {dockTarget?.tabId === tab.id && (
-                  <span className="terminal-dock-hint">{dockZoneLabels[dockTarget.zone]}</span>
+                {shouldShowDockCue && tabDockTarget && (
+                  <span className="terminal-dock-hint">{dockZoneLabels[tabDockTarget.zone]}</span>
                 )}
               </div>
               <TerminalSessionView

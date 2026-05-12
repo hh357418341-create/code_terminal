@@ -958,9 +958,8 @@ input {
     opacity 120ms ease;
 }
 
-.terminal-surface:hover .terminal-resize-handle,
 .terminal-surface.resizing .terminal-resize-handle,
-.terminal-resize-handle:hover {
+.terminal-resize-handle:focus-visible {
   opacity: 1;
 }
 
