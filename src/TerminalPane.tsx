@@ -1,4 +1,4 @@
-import { LayoutGrid, Plus, RotateCcw, Square, X } from "lucide-react";
+import { PanelTop, Plus, RotateCcw, Square, SquareStack, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import {
@@ -37,7 +37,7 @@ interface TerminalTabsState {
   activeTabId: string;
 }
 
-type TerminalLayoutMode = "1x1" | "1x2" | "2x2" | "2x3" | "3x3";
+type TerminalDisplayMode = "tabs" | "tiles";
 type ResizeAxis = "column" | "row";
 
 interface ResizeDragState {
@@ -51,20 +51,22 @@ interface ResizeDragState {
 
 type TerminalRuntimeStatus = "starting" | "running" | "stopped";
 
-const terminalLayoutModes: Array<{
-  mode: TerminalLayoutMode;
-  label: string;
-  title: string;
+interface TerminalLayoutPreferences {
+  displayMode: TerminalDisplayMode;
+}
+
+interface TerminalGridLayout {
+  displayMode: TerminalDisplayMode;
   rows: number;
   columns: number;
   visibleCount: number;
-}> = [
-  { mode: "1x1", label: "1x1", title: "1 行 1 列", rows: 1, columns: 1, visibleCount: 1 },
-  { mode: "1x2", label: "1x2", title: "1 行 2 列", rows: 1, columns: 2, visibleCount: 2 },
-  { mode: "2x2", label: "2x2", title: "2 行 2 列", rows: 2, columns: 2, visibleCount: 4 },
-  { mode: "2x3", label: "2x3", title: "2 行 3 列", rows: 2, columns: 3, visibleCount: 6 },
-  { mode: "3x3", label: "3x3", title: "3 行 3 列", rows: 3, columns: 3, visibleCount: 9 },
-];
+}
+
+const terminalLayoutStorageKey = "opencode-workbench.terminal-layout";
+const maxVisibleTerminals = 9;
+const defaultLayoutPreferences: TerminalLayoutPreferences = {
+  displayMode: "tiles",
+};
 
 function projectTitle(name?: string | null, index?: number) {
   const trimmedName = name?.trim();
@@ -155,12 +157,57 @@ function resizeAdjacentWeights(startSizes: number[], index: number, delta: numbe
   return next;
 }
 
-function getAutoLayoutMode(tabCount: number): TerminalLayoutMode {
-  const count = Math.max(1, tabCount);
-  return (
-    terminalLayoutModes.find((layout) => layout.visibleCount >= count)?.mode ??
-    terminalLayoutModes[terminalLayoutModes.length - 1].mode
-  );
+function clampVisibleCount(tabCount: number) {
+  return Math.max(1, Math.min(maxVisibleTerminals, tabCount));
+}
+
+function readStoredLayoutPreferences(): TerminalLayoutPreferences {
+  try {
+    const raw = window.localStorage.getItem(terminalLayoutStorageKey);
+    if (!raw) return defaultLayoutPreferences;
+
+    const parsed = JSON.parse(raw) as Partial<TerminalLayoutPreferences> | null;
+    const displayMode = parsed?.displayMode === "tabs" ? "tabs" : "tiles";
+    return { displayMode };
+  } catch {
+    return defaultLayoutPreferences;
+  }
+}
+
+function cacheLayoutPreferences(preferences: TerminalLayoutPreferences) {
+  window.localStorage.setItem(terminalLayoutStorageKey, JSON.stringify(preferences));
+}
+
+function getGridLayout(preferences: TerminalLayoutPreferences, tabCount: number): TerminalGridLayout {
+  const visibleCount = preferences.displayMode === "tabs" ? 1 : clampVisibleCount(tabCount);
+
+  if (preferences.displayMode === "tabs" || visibleCount === 1) {
+    return {
+      ...preferences,
+      rows: 1,
+      columns: 1,
+      visibleCount,
+    };
+  }
+
+  const columns = Math.ceil(Math.sqrt(visibleCount));
+  const rows = Math.ceil(visibleCount / columns);
+  return {
+    ...preferences,
+    rows,
+    columns,
+    visibleCount,
+  };
+}
+
+function getGridCellStyle(index: number, layout: TerminalGridLayout): CSSProperties | undefined {
+  if (layout.displayMode !== "tiles" || layout.visibleCount !== 3 || index !== 0) {
+    return undefined;
+  }
+
+  return {
+    gridRow: "1 / -1",
+  };
 }
 
 export function TerminalPane({
@@ -185,8 +232,11 @@ export function TerminalPane({
   const [terminalTabs, setTerminalTabs] = useState<TerminalTabsState>(() =>
     createInitialTabs({ id: activeProjectId, name: activeProjectName, path: activeProjectPath }),
   );
-  const [layoutMode, setLayoutMode] = useState<TerminalLayoutMode>("1x1");
-  const activeLayout = terminalLayoutModes.find((layout) => layout.mode === layoutMode) ?? terminalLayoutModes[0];
+  const [layoutPreferences, setLayoutPreferences] = useState<TerminalLayoutPreferences>(readStoredLayoutPreferences);
+  const activeLayout = useMemo(
+    () => getGridLayout(layoutPreferences, terminalTabs.tabs.length),
+    [layoutPreferences, terminalTabs.tabs.length],
+  );
   const [columnWeights, setColumnWeights] = useState(() => createEqualWeights(activeLayout.columns));
   const [rowWeights, setRowWeights] = useState(() => createEqualWeights(activeLayout.rows));
   const [isResizingLayout, setIsResizingLayout] = useState(false);
@@ -206,14 +256,24 @@ export function TerminalPane({
 
   const activeRuntime = tabRuntime[terminalTabs.activeTabId];
   const visibleTabs = useMemo(() => {
+    if (activeLayout.displayMode === "tabs") {
+      const activeTab = terminalTabs.tabs.find((tab) => tab.id === terminalTabs.activeTabId);
+      return activeTab ? [activeTab] : terminalTabs.tabs.slice(0, 1);
+    }
+
     const activeIndex = terminalTabs.tabs.findIndex((tab) => tab.id === terminalTabs.activeTabId);
     if (activeIndex < 0) return terminalTabs.tabs.slice(0, activeLayout.visibleCount);
 
     const pageStart =
       Math.floor(activeIndex / activeLayout.visibleCount) * activeLayout.visibleCount;
     return terminalTabs.tabs.slice(pageStart, pageStart + activeLayout.visibleCount);
-  }, [activeLayout.visibleCount, terminalTabs.activeTabId, terminalTabs.tabs]);
+  }, [activeLayout.displayMode, activeLayout.visibleCount, terminalTabs.activeTabId, terminalTabs.tabs]);
   const visibleTabIds = useMemo(() => new Set(visibleTabs.map((tab) => tab.id)), [visibleTabs]);
+
+  function updateLayoutPreferences(nextPreferences: TerminalLayoutPreferences) {
+    setLayoutPreferences(nextPreferences);
+    window.setTimeout(() => terminalHandlesRef.current[terminalTabs.activeTabId]?.focus(), 0);
+  }
 
   function fitVisibleTerminals() {
     visibleTabs.forEach((tab) => terminalHandlesRef.current[tab.id]?.fit());
@@ -312,6 +372,10 @@ export function TerminalPane({
   }, []);
 
   useEffect(() => {
+    cacheLayoutPreferences(layoutPreferences);
+  }, [layoutPreferences]);
+
+  useEffect(() => {
     if (previousProjectIdRef.current === activeProjectId) return;
 
     previousProjectIdRef.current = activeProjectId;
@@ -328,14 +392,15 @@ export function TerminalPane({
         };
       }
 
-      const emptyTabIndex = current.tabs.findIndex((tab) => !tab.projectId);
-      if (emptyTabIndex >= 0) {
+      const activeTab = current.tabs.find((tab) => tab.id === current.activeTabId);
+      if (activeTab && !activeTab.projectId) {
+        const activeTabIndex = current.tabs.findIndex((tab) => tab.id === current.activeTabId);
         const tabs = current.tabs.map((tab, index) =>
-          index === emptyTabIndex ? bindTerminalTab(tab, index + 1, activeProjectBinding) : tab,
+          tab.id === current.activeTabId ? bindTerminalTab(tab, index + 1, activeProjectBinding) : tab,
         );
         return {
           tabs,
-          activeTabId: tabs[emptyTabIndex].id,
+          activeTabId: tabs[activeTabIndex].id,
         };
       }
 
@@ -368,7 +433,7 @@ export function TerminalPane({
 
   useEffect(() => {
     scheduleVisibleTerminalFit(true);
-  }, [layoutMode, visibleTabs]);
+  }, [layoutPreferences, visibleTabs]);
 
   useEffect(() => {
     setColumnWeights(createEqualWeights(activeLayout.columns));
@@ -386,31 +451,6 @@ export function TerminalPane({
       tabs: [...current.tabs, tab],
       activeTabId: tab.id,
     }));
-  }
-
-  function ensureLayoutTerminals(mode: TerminalLayoutMode) {
-    const layout = terminalLayoutModes.find((item) => item.mode === mode) ?? terminalLayoutModes[0];
-
-    setTerminalTabs((current) => {
-      if (current.tabs.length >= layout.visibleCount) return current;
-
-      const tabs = [...current.tabs];
-      while (tabs.length < layout.visibleCount) {
-        tabs.push(createTerminalTab(nextTabIndexRef.current, activeProjectBinding));
-        nextTabIndexRef.current += 1;
-      }
-
-      return {
-        ...current,
-        tabs,
-      };
-    });
-  }
-
-  function changeLayoutMode(mode: TerminalLayoutMode) {
-    setLayoutMode(mode);
-    ensureLayoutTerminals(mode);
-    window.setTimeout(() => terminalHandlesRef.current[terminalTabs.activeTabId]?.focus(), 0);
   }
 
   function closeTerminalTab(tabId: string) {
@@ -433,7 +473,6 @@ export function TerminalPane({
     });
     setRoutedCommand((current) => (current?.tabId === tabId ? null : current));
     setTerminalTabs({ tabs, activeTabId });
-    setLayoutMode(getAutoLayoutMode(tabs.length));
     if (isClosingActiveTab && fallbackTab.projectId && fallbackTab.projectId !== activeProjectId) {
       void onProjectFocus?.(fallbackTab.projectId);
     }
@@ -524,20 +563,23 @@ export function TerminalPane({
         </div>
 
         <div className="terminal-actions">
-          <div className="terminal-layout-switch" aria-label="终端布局">
-            {terminalLayoutModes.map((layout) => {
-              return (
-                <button
-                  key={layout.mode}
-                  className={`terminal-layout-button ${layoutMode === layout.mode ? "active" : ""}`}
-                  title={layout.title}
-                  onClick={() => changeLayoutMode(layout.mode)}
-                >
-                  <LayoutGrid size={13} />
-                  <span>{layout.label}</span>
-                </button>
-              );
-            })}
+          <div className="terminal-layout-switch" aria-label="终端显示方式">
+            <button
+              className={`terminal-layout-button ${layoutPreferences.displayMode === "tabs" ? "active" : ""}`}
+              title="单 Tab 显示"
+              onClick={() => updateLayoutPreferences({ ...layoutPreferences, displayMode: "tabs" })}
+            >
+              <PanelTop size={13} />
+              <span>单 Tab</span>
+            </button>
+            <button
+              className={`terminal-layout-button ${layoutPreferences.displayMode === "tiles" ? "active" : ""}`}
+              title="多瓦片显示"
+              onClick={() => updateLayoutPreferences({ ...layoutPreferences, displayMode: "tiles" })}
+            >
+              <SquareStack size={13} />
+              <span>多瓦片</span>
+            </button>
           </div>
           <button
             className="terminal-action"
@@ -579,6 +621,7 @@ export function TerminalPane({
                 visibleTabIds.has(tab.id) ? "visible" : ""
               }`}
               key={tab.id}
+              style={getGridCellStyle(visibleTabs.findIndex((item) => item.id === tab.id), activeLayout)}
               onMouseDown={() => focusTerminal(tab.id)}
             >
               <div className="terminal-cell-header">
