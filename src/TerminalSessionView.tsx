@@ -22,6 +22,13 @@ interface SavedPastedImage {
   path: string;
 }
 
+interface EditableSelectionRange {
+  startX: number;
+  startY: number;
+  endX: number;
+  endY: number;
+}
+
 export interface TerminalSessionRuntime {
   session: TerminalStarted | null;
   isStarting: boolean;
@@ -175,36 +182,15 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       }
     }
 
-    function normalizePastedText(text: string) {
-      return text.replace(/\r?\n/g, "\r");
-    }
-
-    function writeTerminalInput(data: string) {
+    function writeRawTerminalInput(data: string) {
       const sessionId = sessionIdRef.current;
       if (!sessionId || !data) return;
 
       revealCursorForInput();
       invoke("terminal_write", {
         sessionId,
-        data: normalizePastedText(data),
+        data,
       }).catch(reportTerminalError);
-    }
-
-    async function pasteFromClipboard() {
-      try {
-        const text = await navigator.clipboard?.readText();
-        writeTerminalInput(text || "");
-      } catch {
-        // The browser paste event usually follows Ctrl+V; clipboard API can be denied by the webview.
-      }
-    }
-
-    function isPasteShortcut(event: KeyboardEvent) {
-      const key = event.key.toLowerCase();
-      return (
-        ((event.ctrlKey || event.metaKey) && !event.altKey && key === "v") ||
-        (event.shiftKey && !event.ctrlKey && !event.metaKey && key === "insert")
-      );
     }
 
     function getClipboardImageItem(dataTransfer: DataTransfer | null) {
@@ -229,6 +215,137 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
 
     function formatPastedImagePath(path: string) {
       return `"${path.replace(/"/g, '\\"')}"`;
+    }
+
+    function isPasteShortcut(event: KeyboardEvent) {
+      const key = event.key.toLowerCase();
+      return (
+        event.type === "keydown" &&
+        (((event.ctrlKey || event.metaKey) && !event.altKey && key === "v") ||
+          (event.shiftKey && !event.ctrlKey && !event.metaKey && key === "insert"))
+      );
+    }
+
+    function isDeletionShortcut(event: KeyboardEvent) {
+      return (
+        event.type === "keydown" &&
+        !event.ctrlKey &&
+        !event.altKey &&
+        !event.metaKey &&
+        (event.key === "Backspace" || event.key === "Delete")
+      );
+    }
+
+    function orderedSelectionRange(range: EditableSelectionRange): EditableSelectionRange {
+      const isReversed =
+        range.startY > range.endY ||
+        (range.startY === range.endY && range.startX > range.endX);
+
+      if (!isReversed) return range;
+
+      return {
+        startX: range.endX,
+        startY: range.endY,
+        endX: range.startX,
+        endY: range.startY,
+      };
+    }
+
+    function getEditableSelectionRange(terminal: XTerm) {
+      const rawRange = terminal.getSelectionPosition();
+      const buffer = terminal.buffer.active;
+      if (!rawRange || buffer.type !== "normal") return null;
+
+      const cursorRow = buffer.baseY + buffer.cursorY;
+      const range = orderedSelectionRange({
+        startX: rawRange.start.x,
+        startY: rawRange.start.y,
+        endX: rawRange.end.x,
+        endY: rawRange.end.y,
+      });
+
+      if (
+        range.startY === cursorRow &&
+        range.endY === cursorRow &&
+        range.startX >= 0 &&
+        range.endX > range.startX &&
+        range.endX <= terminal.cols &&
+        range.startY >= 0 &&
+        range.startY < buffer.length
+      ) {
+        return range;
+      }
+
+      return null;
+    }
+
+    function countLineCharacters(terminal: XTerm, row: number, startX: number, endX: number) {
+      const buffer = terminal.buffer.active;
+      const line = buffer.getLine(row);
+      if (!line) return 0;
+
+      const reusableCell = buffer.getNullCell();
+      let count = 0;
+      for (let column = startX; column < endX; column += 1) {
+        const cell = line.getCell(column, reusableCell);
+        if (cell && cell.getWidth() > 0) {
+          count += 1;
+        }
+      }
+
+      return count;
+    }
+
+    function countSelectedCharacters(terminal: XTerm, range: EditableSelectionRange) {
+      const count = countLineCharacters(terminal, range.startY, range.startX, range.endX);
+      return count || Array.from(terminal.getSelection().replace(/\r?\n/g, "")).length;
+    }
+
+    function repeatSequence(sequence: string, count: number) {
+      return count > 0 ? sequence.repeat(count) : "";
+    }
+
+    function deleteEditableSelection(terminal: XTerm) {
+      if (!terminal.hasSelection()) return false;
+
+      const range = getEditableSelectionRange(terminal);
+      if (!range) {
+        terminal.clearSelection();
+        return true;
+      }
+
+      const deleteCount = countSelectedCharacters(terminal, range);
+      if (deleteCount <= 0) {
+        terminal.clearSelection();
+        return true;
+      }
+
+      const cursorX = terminal.buffer.active.cursorX;
+      const moveCount = countLineCharacters(
+        terminal,
+        range.startY,
+        Math.min(cursorX, range.endX),
+        Math.max(cursorX, range.endX),
+      );
+      const moveToSelectionEnd =
+        range.endX < cursorX
+          ? repeatSequence("\x1b[D", moveCount)
+          : repeatSequence("\x1b[C", moveCount);
+
+      terminal.clearSelection();
+      writeRawTerminalInput(`${moveToSelectionEnd}${repeatSequence("\x7f", deleteCount)}`);
+      return true;
+    }
+
+    function handleSelectionDeleteShortcut(event: KeyboardEvent) {
+      if (!isDeletionShortcut(event)) return false;
+
+      const terminal = terminalRef.current;
+      if (!terminal?.hasSelection()) return false;
+
+      event.preventDefault();
+      event.stopPropagation();
+      return deleteEditableSelection(terminal);
     }
 
     async function stopSession() {
@@ -457,35 +574,23 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         invoke("terminal_write", { sessionId, data }).catch(reportTerminalError);
       });
       terminal.attachCustomKeyEventHandler((event) => {
-        if (!isPasteShortcut(event)) return true;
-        if (event.type === "keydown") {
-          void pasteFromClipboard();
-        }
-        return false;
+        if (isPasteShortcut(event)) return false;
+        return !handleSelectionDeleteShortcut(event);
       });
 
       const pasteListener = (event: ClipboardEvent) => {
         const imageItem = getClipboardImageItem(event.clipboardData);
-        if (imageItem) {
-          event.preventDefault();
-          event.stopPropagation();
-          void saveClipboardImage(imageItem)
-            .then((path) => {
-              if (path) writeTerminalInput(formatPastedImagePath(path));
-            })
-            .catch(reportTerminalError);
-          return;
-        }
-
-        const text = event.clipboardData?.getData("text/plain");
-        if (!text) return;
+        if (!imageItem) return;
 
         event.preventDefault();
         event.stopPropagation();
-        writeTerminalInput(text);
+        void saveClipboardImage(imageItem)
+          .then((path) => {
+            if (path) terminalRef.current?.paste(formatPastedImagePath(path));
+          })
+          .catch(reportTerminalError);
       };
-      host.addEventListener("paste", pasteListener);
-      terminal.textarea?.addEventListener("paste", pasteListener);
+      host.addEventListener("paste", pasteListener, { capture: true });
 
       const resizeObserver = new ResizeObserver(() => {
         scheduleFitAndResize();
@@ -515,8 +620,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         window.removeEventListener("resize", scheduleFitAndResize);
         document.removeEventListener("fullscreenchange", scheduleFitAndResize);
         window.visualViewport?.removeEventListener("resize", scheduleFitAndResize);
-        host.removeEventListener("paste", pasteListener);
-        terminal.textarea?.removeEventListener("paste", pasteListener);
+        host.removeEventListener("paste", pasteListener, { capture: true });
         terminal.attachCustomKeyEventHandler(() => true);
         bufferDisposable.dispose();
         dataDisposable.dispose();
