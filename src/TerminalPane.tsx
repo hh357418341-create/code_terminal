@@ -38,6 +38,7 @@ interface TerminalTabsState {
 }
 
 type TerminalDisplayMode = "tabs" | "tiles";
+type TerminalDockZone = "top" | "right" | "bottom" | "left" | "center";
 type ResizeAxis = "column" | "row";
 
 interface ResizeDragState {
@@ -49,14 +50,42 @@ interface ResizeDragState {
   startSizes: number[];
 }
 
+interface TerminalTileDragState {
+  tabId: string;
+  pointerId: number;
+  startClientX: number;
+  startClientY: number;
+  dragging: boolean;
+  target: TerminalDockTarget | null;
+}
+
+interface TerminalDockTarget {
+  tabId: string;
+  zone: TerminalDockZone;
+}
+
 type TerminalRuntimeStatus = "starting" | "running" | "stopped";
+
+type TerminalTileArrangement =
+  | { kind: "auto" }
+  | { kind: "columns" }
+  | { kind: "rows" }
+  | {
+      kind: "columnStack";
+      anchorTabId: string;
+      dockedTabId: string;
+      dockedBefore: boolean;
+      stackColumn: "left" | "right";
+    };
 
 interface TerminalLayoutPreferences {
   displayMode: TerminalDisplayMode;
+  tileArrangement: TerminalTileArrangement;
 }
 
 interface TerminalGridLayout {
   displayMode: TerminalDisplayMode;
+  tileArrangement: TerminalTileArrangement;
   rows: number;
   columns: number;
   visibleCount: number;
@@ -66,6 +95,14 @@ const terminalLayoutStorageKey = "opencode-workbench.terminal-layout";
 const maxVisibleTerminals = 9;
 const defaultLayoutPreferences: TerminalLayoutPreferences = {
   displayMode: "tiles",
+  tileArrangement: { kind: "auto" },
+};
+const dockZoneLabels: Record<TerminalDockZone, string> = {
+  top: "停靠到上方",
+  right: "停靠到右侧",
+  bottom: "停靠到下方",
+  left: "停靠到左侧",
+  center: "移到此处",
 };
 
 function projectTitle(name?: string | null, index?: number) {
@@ -168,14 +205,17 @@ function readStoredLayoutPreferences(): TerminalLayoutPreferences {
 
     const parsed = JSON.parse(raw) as Partial<TerminalLayoutPreferences> | null;
     const displayMode = parsed?.displayMode === "tabs" ? "tabs" : "tiles";
-    return { displayMode };
+    return { ...defaultLayoutPreferences, displayMode };
   } catch {
     return defaultLayoutPreferences;
   }
 }
 
 function cacheLayoutPreferences(preferences: TerminalLayoutPreferences) {
-  window.localStorage.setItem(terminalLayoutStorageKey, JSON.stringify(preferences));
+  window.localStorage.setItem(
+    terminalLayoutStorageKey,
+    JSON.stringify({ displayMode: preferences.displayMode }),
+  );
 }
 
 function getGridLayout(preferences: TerminalLayoutPreferences, tabCount: number): TerminalGridLayout {
@@ -190,22 +230,66 @@ function getGridLayout(preferences: TerminalLayoutPreferences, tabCount: number)
     };
   }
 
-  const columns = Math.ceil(Math.sqrt(visibleCount));
-  const rows = Math.ceil(visibleCount / columns);
+  if (preferences.tileArrangement.kind === "rows") {
+    return {
+      ...preferences,
+      rows: visibleCount,
+      columns: 1,
+      visibleCount,
+    };
+  }
+
+  if (preferences.tileArrangement.kind === "columnStack" && visibleCount >= 3) {
+    return {
+      ...preferences,
+      rows: 2,
+      columns: visibleCount - 1,
+      visibleCount,
+    };
+  }
+
   return {
     ...preferences,
-    rows,
-    columns,
+    rows: 1,
+    columns: visibleCount,
     visibleCount,
   };
 }
 
-function getGridCellStyle(index: number, layout: TerminalGridLayout): CSSProperties | undefined {
-  if (layout.displayMode !== "tiles" || layout.visibleCount !== 3 || index !== 0) {
+function getGridCellStyle(
+  tabId: string,
+  visibleTabs: TerminalTab[],
+  layout: TerminalGridLayout,
+): CSSProperties | undefined {
+  if (layout.displayMode !== "tiles" || layout.tileArrangement.kind !== "columnStack") {
     return undefined;
   }
 
+  const { anchorTabId, dockedTabId, dockedBefore, stackColumn } = layout.tileArrangement;
+  if (
+    layout.visibleCount < 3 ||
+    !visibleTabs.some((tab) => tab.id === anchorTabId) ||
+    !visibleTabs.some((tab) => tab.id === dockedTabId)
+  ) {
+    return undefined;
+  }
+
+  if (tabId === anchorTabId || tabId === dockedTabId) {
+    const column = stackColumn === "left" ? 1 : layout.columns;
+    const row = tabId === dockedTabId ? (dockedBefore ? 1 : 2) : dockedBefore ? 2 : 1;
+    return {
+      gridColumn: String(column),
+      gridRow: String(row),
+    };
+  }
+
+  const fillerTabs = visibleTabs.filter((tab) => tab.id !== anchorTabId && tab.id !== dockedTabId);
+  const fillerIndex = fillerTabs.findIndex((tab) => tab.id === tabId);
+  if (fillerIndex < 0) return undefined;
+
+  const column = stackColumn === "left" ? fillerIndex + 2 : fillerIndex + 1;
   return {
+    gridColumn: String(column),
     gridRow: "1 / -1",
   };
 }
@@ -227,6 +311,7 @@ export function TerminalPane({
   const terminalFitFrameRef = useRef<number | null>(null);
   const terminalFitSettleTimersRef = useRef<number[]>([]);
   const resizeDragRef = useRef<ResizeDragState | null>(null);
+  const tileDragRef = useRef<TerminalTileDragState | null>(null);
   const lastRoutedCommandIdRef = useRef<number | null>(null);
   const previousProjectIdRef = useRef(activeProjectId);
   const [terminalTabs, setTerminalTabs] = useState<TerminalTabsState>(() =>
@@ -240,6 +325,8 @@ export function TerminalPane({
   const [columnWeights, setColumnWeights] = useState(() => createEqualWeights(activeLayout.columns));
   const [rowWeights, setRowWeights] = useState(() => createEqualWeights(activeLayout.rows));
   const [isResizingLayout, setIsResizingLayout] = useState(false);
+  const [isDraggingTile, setIsDraggingTile] = useState(false);
+  const [dockTarget, setDockTarget] = useState<TerminalDockTarget | null>(null);
   const [tabRuntime, setTabRuntime] = useState<Record<string, TerminalSessionRuntime>>({});
   const [routedCommand, setRoutedCommand] = useState<{
     tabId: string;
@@ -362,6 +449,135 @@ export function TerminalPane({
     resizeDragRef.current = null;
     setIsResizingLayout(false);
     scheduleVisibleTerminalFit(true);
+  }
+
+  function getDockTarget(clientX: number, clientY: number, draggedTabId: string): TerminalDockTarget | null {
+    const elements = Array.from(
+      terminalSurfaceRef.current?.querySelectorAll<HTMLElement>(".terminal-cell.visible[data-tab-id]") ?? [],
+    );
+
+    for (const element of elements) {
+      const tabId = element.dataset.tabId;
+      if (!tabId || tabId === draggedTabId) continue;
+
+      const rect = element.getBoundingClientRect();
+      if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) {
+        continue;
+      }
+
+      const xRatio = (clientX - rect.left) / Math.max(1, rect.width);
+      const yRatio = (clientY - rect.top) / Math.max(1, rect.height);
+      if (yRatio < 0.28) return { tabId, zone: "top" };
+      if (yRatio > 0.72) return { tabId, zone: "bottom" };
+      if (xRatio < 0.24) return { tabId, zone: "left" };
+      if (xRatio > 0.76) return { tabId, zone: "right" };
+      return { tabId, zone: "center" };
+    }
+
+    return null;
+  }
+
+  function reorderTabsForDock(current: TerminalTab[], draggedTabId: string, target: TerminalDockTarget) {
+    if (draggedTabId === target.tabId) return current;
+
+    const draggedIndex = current.findIndex((tab) => tab.id === draggedTabId);
+    const targetIndex = current.findIndex((tab) => tab.id === target.tabId);
+    if (draggedIndex < 0 || targetIndex < 0) return current;
+
+    const tabs = [...current];
+    const [draggedTab] = tabs.splice(draggedIndex, 1);
+    const nextTargetIndex = tabs.findIndex((tab) => tab.id === target.tabId);
+    const insertIndex = target.zone === "right" || target.zone === "bottom" ? nextTargetIndex + 1 : nextTargetIndex;
+    tabs.splice(insertIndex, 0, draggedTab);
+    return tabs;
+  }
+
+  function getArrangementForDock(draggedTabId: string, target: TerminalDockTarget): TerminalTileArrangement {
+    if (target.zone === "top" || target.zone === "bottom") {
+      return {
+        kind: "columnStack",
+        anchorTabId: target.tabId,
+        dockedTabId: draggedTabId,
+        dockedBefore: target.zone === "top",
+        stackColumn: "right",
+      };
+    }
+
+    if (target.zone === "center") {
+      return { kind: "auto" };
+    }
+
+    return { kind: "columns" };
+  }
+
+  function applyDockTarget(draggedTabId: string, target: TerminalDockTarget) {
+    setTerminalTabs((current) => ({
+      tabs: reorderTabsForDock(current.tabs, draggedTabId, target),
+      activeTabId: draggedTabId,
+    }));
+    setLayoutPreferences((current) => ({
+      ...current,
+      displayMode: "tiles",
+      tileArrangement: getArrangementForDock(draggedTabId, target),
+    }));
+    window.setTimeout(() => scheduleVisibleTerminalFit(true), 0);
+  }
+
+  function startTileDrag(tabId: string, event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.button !== 0 || layoutPreferences.displayMode !== "tiles" || terminalTabs.tabs.length <= 1) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    tileDragRef.current = {
+      tabId,
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      dragging: false,
+      target: null,
+    };
+  }
+
+  function updateTileDrag(event: ReactPointerEvent<HTMLDivElement>) {
+    const drag = tileDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+
+    event.preventDefault();
+    const deltaX = Math.abs(event.clientX - drag.startClientX);
+    const deltaY = Math.abs(event.clientY - drag.startClientY);
+    if (!drag.dragging && Math.max(deltaX, deltaY) < 8) return;
+
+    const target = getDockTarget(event.clientX, event.clientY, drag.tabId);
+    tileDragRef.current = {
+      ...drag,
+      dragging: true,
+      target,
+    };
+    setIsDraggingTile(true);
+    setDockTarget(target);
+  }
+
+  function finishTileDrag(event: ReactPointerEvent<HTMLDivElement>) {
+    const drag = tileDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      // Pointer capture can already be released when the window loses focus.
+    }
+
+    tileDragRef.current = null;
+    setIsDraggingTile(false);
+    setDockTarget(null);
+    if (drag.dragging && drag.target) {
+      applyDockTarget(drag.tabId, drag.target);
+      return;
+    }
+    focusTerminal(drag.tabId);
   }
 
   const updateRuntime = useCallback((tabId: string, runtime: TerminalSessionRuntime) => {
@@ -603,7 +819,7 @@ export function TerminalPane({
       </header>
 
       <div
-        className={`terminal-surface ${isResizingLayout ? "resizing" : ""}`}
+        className={`terminal-surface ${isResizingLayout ? "resizing" : ""} ${isDraggingTile ? "tile-dragging" : ""}`}
         ref={terminalSurfaceRef}
         style={{
           gridTemplateColumns: formatGridWeights(columnWeights),
@@ -619,12 +835,22 @@ export function TerminalPane({
             <div
               className={`terminal-cell ${tab.id === terminalTabs.activeTabId ? "active" : ""} ${
                 visibleTabIds.has(tab.id) ? "visible" : ""
+              } ${tileDragRef.current?.tabId === tab.id ? "dragging" : ""} ${
+                dockTarget?.tabId === tab.id ? `dock-target dock-${dockTarget.zone}` : ""
               }`}
+              data-tab-id={tab.id}
               key={tab.id}
-              style={getGridCellStyle(visibleTabs.findIndex((item) => item.id === tab.id), activeLayout)}
+              style={getGridCellStyle(tab.id, visibleTabs, activeLayout)}
               onMouseDown={() => focusTerminal(tab.id)}
             >
-              <div className="terminal-cell-header">
+              <div
+                className="terminal-cell-header"
+                title="拖动调整瓦片位置"
+                onPointerCancel={finishTileDrag}
+                onPointerDown={(event) => startTileDrag(tab.id, event)}
+                onPointerMove={updateTileDrag}
+                onPointerUp={finishTileDrag}
+              >
                 <span className="terminal-cell-meta">
                   <span className="terminal-cell-title">
                     <span className={`terminal-cell-status ${status}`} />
@@ -645,9 +871,13 @@ export function TerminalPane({
                       event.stopPropagation();
                       closeTerminalTab(tab.id);
                     }}
+                    onPointerDown={(event) => event.stopPropagation()}
                   >
                     <X size={12} />
                   </button>
+                )}
+                {dockTarget?.tabId === tab.id && (
+                  <span className="terminal-dock-hint">{dockZoneLabels[dockTarget.zone]}</span>
                 )}
               </div>
               <TerminalSessionView

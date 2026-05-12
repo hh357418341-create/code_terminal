@@ -943,6 +943,11 @@ input {
   user-select: none;
 }
 
+.terminal-surface.tile-dragging {
+  cursor: grabbing;
+  user-select: none;
+}
+
 .terminal-resize-handle {
   position: absolute;
   z-index: 20;
@@ -1062,6 +1067,57 @@ input {
   opacity: 1;
 }
 
+.terminal-cell.dragging {
+  opacity: 0.62;
+}
+
+.terminal-cell.dock-target {
+  border-color: color-mix(in srgb, var(--terminal-accent, #8ab4ff) 62%, var(--terminal-border, #1a2433));
+}
+
+.terminal-cell.dock-target::after {
+  position: absolute;
+  z-index: 12;
+  content: "";
+  pointer-events: none;
+  background: color-mix(in srgb, var(--terminal-accent, #8ab4ff) 24%, transparent);
+  border: 1px solid color-mix(in srgb, var(--terminal-accent, #8ab4ff) 68%, transparent);
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #ffffff 8%, transparent);
+}
+
+.terminal-cell.dock-top::after {
+  top: 8px;
+  right: 8px;
+  left: 8px;
+  height: 32%;
+}
+
+.terminal-cell.dock-right::after {
+  top: 8px;
+  right: 8px;
+  bottom: 8px;
+  width: 32%;
+}
+
+.terminal-cell.dock-bottom::after {
+  right: 8px;
+  bottom: 8px;
+  left: 8px;
+  height: 32%;
+}
+
+.terminal-cell.dock-left::after {
+  top: 8px;
+  bottom: 8px;
+  left: 8px;
+  width: 32%;
+}
+
+.terminal-cell.dock-center::after {
+  inset: 8px;
+}
+
 .terminal-cell-header {
   display: grid;
   grid-template-columns: minmax(84px, auto) minmax(60px, 1fr) 24px;
@@ -1080,6 +1136,32 @@ input {
   font-size: 10px;
   font-weight: 630;
   line-height: 1;
+  cursor: grab;
+  touch-action: none;
+}
+
+.terminal-cell-header:active {
+  cursor: grabbing;
+}
+
+.terminal-dock-hint {
+  position: absolute;
+  top: 6px;
+  right: 10px;
+  z-index: 13;
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 7px;
+  color: var(--terminal-fg, #d8e1e8);
+  background: color-mix(in srgb, var(--terminal-accent, #8ab4ff) 34%, var(--terminal-panel, #0c1118));
+  border: 1px solid color-mix(in srgb, var(--terminal-accent, #8ab4ff) 56%, transparent);
+  border-radius: 6px;
+  box-shadow: 0 8px 18px color-mix(in srgb, var(--terminal-bg, #070b10) 42%, transparent);
+  font-size: 10px;
+  font-weight: 760;
+  line-height: 1;
+  pointer-events: none;
 }
 
 .terminal-cell-close {
