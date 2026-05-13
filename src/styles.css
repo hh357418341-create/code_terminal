@@ -1351,14 +1351,29 @@ input {
 }
 
 .terminal-host .xterm-cursor {
-  background-color: transparent !important;
-  border-bottom: 3px solid var(--terminal-accent, #8ab4ff) !important;
-  box-shadow: 0 2px 0 color-mix(in srgb, var(--terminal-accent, #8ab4ff) 34%, transparent);
+  background-color: var(--terminal-accent, #8ab4ff) !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.terminal-host.active .xterm-cursor.xterm-cursor-blink {
+  animation: terminal-composition-cursor 1.05s steps(2, start) infinite;
 }
 
 .terminal-host.terminal-output-streaming .xterm-cursor {
-  border-bottom-color: var(--terminal-accent, #8ab4ff) !important;
   opacity: 1 !important;
+}
+
+@keyframes terminal-composition-cursor {
+  0%,
+  54% {
+    opacity: 1;
+  }
+
+  55%,
+  100% {
+    opacity: 0.38;
+  }
 }
 
 @media (max-width: 1060px) {
