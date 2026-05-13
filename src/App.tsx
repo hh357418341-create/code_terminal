@@ -4,6 +4,8 @@ import {
   FolderOpen,
   Minus,
   Palette,
+  PanelLeftClose,
+  PanelLeftOpen,
   PanelsTopLeft,
   Plus,
   RefreshCw,
@@ -37,6 +39,10 @@ const emptyState: WorkbenchState = {
 };
 const emptyProjectTitle = "未选择项目";
 const appearanceStorageKey = "opencode-workbench.terminal-appearance";
+const sidebarLayoutStorageKey = "opencode-workbench.sidebar-layout";
+const defaultSidebarWidth = 292;
+const minSidebarWidth = 236;
+const maxSidebarWidth = 420;
 const colorFields: Array<{ key: TerminalColorKey; label: string }> = [
   { key: "background", label: "背景" },
   { key: "foreground", label: "文字" },
@@ -44,6 +50,22 @@ const colorFields: Array<{ key: TerminalColorKey; label: string }> = [
 ];
 const customThemeLabel = "自定义";
 type ProjectDropPlacement = "before" | "after";
+interface SidebarLayoutSettings {
+  width: number;
+  collapsed: boolean;
+}
+
+function clampSidebarWidth(value: number) {
+  if (!Number.isFinite(value)) return defaultSidebarWidth;
+  return Math.min(maxSidebarWidth, Math.max(minSidebarWidth, Math.round(value)));
+}
+
+function normalizeSidebarLayout(value?: Partial<SidebarLayoutSettings> | null): SidebarLayoutSettings {
+  return {
+    width: clampSidebarWidth(value?.width ?? defaultSidebarWidth),
+    collapsed: Boolean(value?.collapsed),
+  };
+}
 
 function readStoredTerminalAppearance(): TerminalAppearanceSettings {
   try {
@@ -60,6 +82,23 @@ function readStoredTerminalAppearance(): TerminalAppearanceSettings {
 
 function cacheTerminalAppearance(appearance: TerminalAppearanceSettings) {
   window.localStorage.setItem(appearanceStorageKey, JSON.stringify(appearance));
+}
+
+function readStoredSidebarLayout(): SidebarLayoutSettings {
+  try {
+    const raw = window.localStorage.getItem(sidebarLayoutStorageKey);
+    if (!raw) return normalizeSidebarLayout();
+
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return normalizeSidebarLayout();
+    return normalizeSidebarLayout(parsed as Partial<SidebarLayoutSettings>);
+  } catch {
+    return normalizeSidebarLayout();
+  }
+}
+
+function cacheSidebarLayout(layout: SidebarLayoutSettings) {
+  window.localStorage.setItem(sidebarLayoutStorageKey, JSON.stringify(normalizeSidebarLayout(layout)));
 }
 
 function getWindowProjectId() {
@@ -102,12 +141,20 @@ export function App() {
   const [terminalAppearance, setTerminalAppearance] = useState<TerminalAppearanceSettings>(
     readStoredTerminalAppearance,
   );
+  const [sidebarLayout, setSidebarLayout] = useState<SidebarLayoutSettings>(readStoredSidebarLayout);
+  const [isSidebarResizing, setIsSidebarResizing] = useState(false);
   const [customTerminalAppearance, setCustomTerminalAppearance] = useState<TerminalAppearanceSettings>(() =>
     normalizeTerminalAppearance({ ...readStoredTerminalAppearance(), preset: "custom" }),
   );
   const [fontSizeInput, setFontSizeInput] = useState(() => String(terminalAppearance.fontSize));
   const [lineHeightInput, setLineHeightInput] = useState(() => terminalAppearance.lineHeight.toFixed(2));
   const projectListRef = useRef<HTMLElement | null>(null);
+  const sidebarLayoutRef = useRef(sidebarLayout);
+  const sidebarResizeRef = useRef<{
+    pointerId: number;
+    startClientX: number;
+    startWidth: number;
+  } | null>(null);
 
   const activeProject = useMemo(
     () => state.projects.find((project) => project.id === state.activeProjectId) ?? null,
@@ -121,8 +168,10 @@ export function App() {
   const appHeaderTitle = currentProject?.name || emptyProjectTitle;
   const appHeaderSubtitle = currentProject?.path || "打开项目目录";
   const appHeaderTooltip = currentProject?.path || emptyProjectTitle;
+  const isSidebarCollapsed = sidebarLayout.collapsed;
   const terminalChromeVars = useMemo(() => {
     const chrome = getTerminalChrome(terminalAppearance);
+    const sidebarWidth = sidebarLayout.collapsed ? 0 : sidebarLayout.width;
     return {
       "--terminal-bg": chrome.background,
       "--terminal-fg": chrome.foreground,
@@ -136,8 +185,10 @@ export function App() {
       "--app-text": chrome.sidebarText,
       "--app-muted": chrome.sidebarMuted,
       "--app-soft": chrome.sidebarSoft,
+      "--sidebar-width": `${sidebarWidth}px`,
+      "--sidebar-background-width": `${sidebarWidth}px`,
     } as CSSProperties;
-  }, [terminalAppearance]);
+  }, [sidebarLayout.collapsed, sidebarLayout.width, terminalAppearance]);
 
   async function loadState() {
     const [loaded, initialProjectId] = await Promise.all([
@@ -187,6 +238,10 @@ export function App() {
   useEffect(() => {
     cacheTerminalAppearance(terminalAppearance);
   }, [terminalAppearance]);
+
+  useEffect(() => {
+    sidebarLayoutRef.current = sidebarLayout;
+  }, [sidebarLayout]);
 
   useEffect(() => {
     setFontSizeInput(String(terminalAppearance.fontSize));
@@ -347,6 +402,78 @@ export function App() {
     setProjectDropTarget(null);
   }
 
+  function updateSidebarLayout(nextLayout: SidebarLayoutSettings, shouldCache = true) {
+    const normalized = normalizeSidebarLayout(nextLayout);
+    sidebarLayoutRef.current = normalized;
+    setSidebarLayout(normalized);
+    if (shouldCache) {
+      cacheSidebarLayout(normalized);
+    }
+  }
+
+  function setSidebarCollapsed(collapsed: boolean) {
+    updateSidebarLayout({
+      ...sidebarLayoutRef.current,
+      collapsed,
+    });
+  }
+
+  function startSidebarResize(event: React.PointerEvent<HTMLDivElement>) {
+    if (event.button !== 0) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+
+    const currentLayout = {
+      ...sidebarLayoutRef.current,
+      collapsed: false,
+    };
+    updateSidebarLayout(currentLayout, false);
+    sidebarResizeRef.current = {
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      startWidth: currentLayout.width,
+    };
+    setIsSidebarResizing(true);
+  }
+
+  function updateSidebarResize(event: React.PointerEvent<HTMLDivElement>) {
+    const resize = sidebarResizeRef.current;
+    if (!resize || resize.pointerId !== event.pointerId) return;
+
+    event.preventDefault();
+    const nextWidth = clampSidebarWidth(resize.startWidth + event.clientX - resize.startClientX);
+    updateSidebarLayout(
+      {
+        width: nextWidth,
+        collapsed: false,
+      },
+      false,
+    );
+  }
+
+  function finishSidebarResize(event: React.PointerEvent<HTMLDivElement>) {
+    const resize = sidebarResizeRef.current;
+    if (!resize || resize.pointerId !== event.pointerId) return;
+
+    event.preventDefault();
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
+    sidebarResizeRef.current = null;
+    setIsSidebarResizing(false);
+    cacheSidebarLayout(sidebarLayoutRef.current);
+  }
+
+  function resetSidebarWidth() {
+    updateSidebarLayout({
+      width: defaultSidebarWidth,
+      collapsed: false,
+    });
+  }
+
   async function removeProject(projectId: string) {
     setError(null);
     const updated = await invoke<WorkbenchState>("remove_project", { projectId });
@@ -468,100 +595,127 @@ export function App() {
   }
 
   return (
-    <main className="shell" style={terminalChromeVars}>
-      <aside className="sidebar">
-        <div className="project-root">
-          <div className="project-root-title" title={appHeaderTooltip}>
-            <span className="brand-mark">
-              <SquareTerminal size={18} />
-            </span>
-            <span className="brand-copy">
-              <strong>{appHeaderTitle}</strong>
-              <small>{appHeaderSubtitle}</small>
-            </span>
-          </div>
-          <button className="sidebar-icon" title="打开项目" onClick={chooseProject}>
-            <Plus size={16} />
-          </button>
-        </div>
-
-        <nav
-          className={`project-list ${draggedProjectId ? "dragging" : ""}`}
-          ref={projectListRef}
-          aria-label="项目列表"
-        >
-          {state.projects.length === 0 ? (
-            <button className="empty-project-button" onClick={chooseProject}>
-              打开一个项目目录
+    <main
+      className={`shell ${isSidebarCollapsed ? "sidebar-collapsed" : ""} ${
+        isSidebarResizing ? "sidebar-resizing" : ""
+      }`}
+      style={terminalChromeVars}
+    >
+      {!isSidebarCollapsed && (
+        <aside className="sidebar">
+          <div className="project-root">
+            <div className="project-root-title" title={appHeaderTooltip}>
+              <span className="brand-mark">
+                <SquareTerminal size={18} />
+              </span>
+              <span className="brand-copy">
+                <strong>{appHeaderTitle}</strong>
+                <small>{appHeaderSubtitle}</small>
+              </span>
+            </div>
+            <button className="sidebar-icon" title="打开项目" onClick={chooseProject}>
+              <Plus size={16} />
             </button>
-          ) : (
-            state.projects.map((project) => (
-              <div
-                key={project.id}
-                data-project-id={project.id}
-                className={`project-item ${project.id === currentProject?.id ? "active" : ""} ${
-                  project.id === draggedProjectId ? "dragging" : ""
-                } ${
-                  projectDropTarget?.id === project.id ? `drag-over ${projectDropTarget.placement}` : ""
-                }`}
-                title={project.path}
-              >
-                <button
-                  className="project-drag-handle"
-                  title="拖动调整项目顺序"
-                  onPointerDown={(event) => startProjectDrag(project.id, event)}
-                >
-                  <GripVertical size={14} />
-                </button>
-                <button
-                  className="project-folder-button"
-                  disabled={openingProjectFolderId === project.id}
-                  title="在文件管理器中打开目录"
-                  aria-label={`打开 ${project.name} 目录`}
-                  onClick={() => openProjectFolder(project.id)}
-                >
-                  <FolderOpen className="project-item-icon" size={15} />
-                </button>
-                <button
-                  className="project-select"
-                  title={project.path}
-                  onClick={() => setActive(project.id)}
-                >
-                  <span className="project-copy">
-                    <span className="project-title">{project.name}</span>
-                    <span className="project-path">{project.path}</span>
-                  </span>
-                </button>
-                <span className="project-time">{formatRelativeTime(project.lastOpenedAt)}前</span>
-                <button
-                  className="project-window-button"
-                  disabled={openingProjectWindowId === project.id}
-                  title="新窗口打开这个项目"
-                  onClick={() => openProjectWindow(project.id)}
-                >
-                  <ExternalLink size={13} />
-                </button>
-              </div>
-            ))
-          )}
-        </nav>
+            <button className="sidebar-icon" title="隐藏项目栏" onClick={() => setSidebarCollapsed(true)}>
+              <PanelLeftClose size={16} />
+            </button>
+          </div>
 
-        <div className="sidebar-footer">
-          <span className="project-count">{state.projects.length} 个项目</span>
-          <button
-            className="footer-button"
-            title="刷新"
-            onClick={() => loadState()}
+          <nav
+            className={`project-list ${draggedProjectId ? "dragging" : ""}`}
+            ref={projectListRef}
+            aria-label="项目列表"
           >
-            <RefreshCw size={16} />
-            刷新
-          </button>
-        </div>
-      </aside>
+            {state.projects.length === 0 ? (
+              <button className="empty-project-button" onClick={chooseProject}>
+                打开一个项目目录
+              </button>
+            ) : (
+              state.projects.map((project) => (
+                <div
+                  key={project.id}
+                  data-project-id={project.id}
+                  className={`project-item ${project.id === currentProject?.id ? "active" : ""} ${
+                    project.id === draggedProjectId ? "dragging" : ""
+                  } ${
+                    projectDropTarget?.id === project.id ? `drag-over ${projectDropTarget.placement}` : ""
+                  }`}
+                  title={project.path}
+                >
+                  <button
+                    className="project-drag-handle"
+                    title="拖动调整项目顺序"
+                    onPointerDown={(event) => startProjectDrag(project.id, event)}
+                  >
+                    <GripVertical size={14} />
+                  </button>
+                  <button
+                    className="project-folder-button"
+                    disabled={openingProjectFolderId === project.id}
+                    title="在文件管理器中打开目录"
+                    aria-label={`打开 ${project.name} 目录`}
+                    onClick={() => openProjectFolder(project.id)}
+                  >
+                    <FolderOpen className="project-item-icon" size={15} />
+                  </button>
+                  <button
+                    className="project-select"
+                    title={project.path}
+                    onClick={() => setActive(project.id)}
+                  >
+                    <span className="project-copy">
+                      <span className="project-title">{project.name}</span>
+                      <span className="project-path">{project.path}</span>
+                    </span>
+                  </button>
+                  <span className="project-time">{formatRelativeTime(project.lastOpenedAt)}前</span>
+                  <button
+                    className="project-window-button"
+                    disabled={openingProjectWindowId === project.id}
+                    title="新窗口打开这个项目"
+                    onClick={() => openProjectWindow(project.id)}
+                  >
+                    <ExternalLink size={13} />
+                  </button>
+                </div>
+              ))
+            )}
+          </nav>
+
+          <div className="sidebar-footer">
+            <span className="project-count">{state.projects.length} 个项目</span>
+            <button
+              className="footer-button"
+              title="刷新"
+              onClick={() => loadState()}
+            >
+              <RefreshCw size={16} />
+              刷新
+            </button>
+          </div>
+          <div
+            aria-label="调整项目栏宽度"
+            aria-orientation="vertical"
+            className="sidebar-resize-handle"
+            role="separator"
+            title="拖动调整项目栏宽度，双击重置"
+            onDoubleClick={resetSidebarWidth}
+            onPointerCancel={finishSidebarResize}
+            onPointerDown={startSidebarResize}
+            onPointerMove={updateSidebarResize}
+            onPointerUp={finishSidebarResize}
+          />
+        </aside>
+      )}
 
       <section className="workspace">
         <header className="workspace-bar">
           <div className="project-heading">
+            {isSidebarCollapsed && (
+              <button className="icon-button" title="显示项目栏" onClick={() => setSidebarCollapsed(false)}>
+                <PanelLeftOpen size={16} />
+              </button>
+            )}
             <div className="terminal-mark">
               <PanelsTopLeft size={18} />
             </div>

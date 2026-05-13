@@ -52,12 +52,21 @@ input {
 
 .shell {
   display: grid;
-  grid-template-columns: 292px minmax(0, 1fr);
+  grid-template-columns: var(--sidebar-width, 292px) minmax(0, 1fr);
   height: 100%;
   overflow: hidden;
   background:
-    linear-gradient(90deg, var(--app-sidebar, #eef2f6) 0 292px, transparent 292px),
+    linear-gradient(
+      90deg,
+      var(--app-sidebar, #eef2f6) 0 var(--sidebar-background-width, 292px),
+      transparent var(--sidebar-background-width, 292px)
+    ),
     var(--terminal-bg, #e9edf2);
+}
+
+.shell.sidebar-resizing {
+  cursor: col-resize;
+  user-select: none;
 }
 
 @supports (height: 100dvh) {
@@ -68,6 +77,8 @@ input {
 
 .sidebar {
   display: flex;
+  position: relative;
+  grid-column: 1;
   flex-direction: column;
   min-width: 0;
   padding: 18px 10px 12px;
@@ -78,9 +89,9 @@ input {
 
 .project-root {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 34px;
+  grid-template-columns: minmax(0, 1fr) 34px 34px;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   min-height: 44px;
   padding: 0 2px 16px;
 }
@@ -426,8 +437,38 @@ input {
   background: color-mix(in srgb, var(--terminal-fg, #d8e1e8) 10%, transparent);
 }
 
+.sidebar-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -7px;
+  bottom: 0;
+  z-index: 30;
+  width: 14px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.sidebar-resize-handle::after {
+  position: absolute;
+  top: 18px;
+  right: 6px;
+  bottom: 18px;
+  width: 2px;
+  content: "";
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--terminal-accent, #8ab4ff) 70%, transparent);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.sidebar-resize-handle:hover::after,
+.shell.sidebar-resizing .sidebar-resize-handle::after {
+  opacity: 1;
+}
+
 .workspace {
   display: flex;
+  grid-column: 2;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
@@ -1350,7 +1391,7 @@ input {
   background: transparent;
 }
 
-.terminal-host.terminal-output-streaming .xterm-cursor {
+.terminal-host.active.terminal-output-streaming .xterm-cursor {
   opacity: 1 !important;
 }
 
@@ -1360,9 +1401,12 @@ input {
   }
 
   .shell {
-    grid-template-columns: 256px minmax(0, 1fr);
     background:
-      linear-gradient(90deg, var(--app-sidebar, #eef2f6) 0 256px, transparent 256px),
+      linear-gradient(
+        90deg,
+        var(--app-sidebar, #eef2f6) 0 var(--sidebar-background-width, 256px),
+        transparent var(--sidebar-background-width, 256px)
+      ),
       var(--terminal-bg, #e9edf2);
   }
 
