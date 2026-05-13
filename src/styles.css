@@ -1351,13 +1351,13 @@ input {
 }
 
 .terminal-host .xterm-cursor {
-  background-color: var(--terminal-accent, #8ab4ff) !important;
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--terminal-bg, #070b10) 80%, transparent),
-    0 0 0 3px color-mix(in srgb, var(--terminal-accent, #8ab4ff) 22%, transparent);
+  background-color: transparent !important;
+  border-bottom: 3px solid var(--terminal-accent, #8ab4ff) !important;
+  box-shadow: 0 2px 0 color-mix(in srgb, var(--terminal-accent, #8ab4ff) 34%, transparent);
 }
 
 .terminal-host.terminal-output-streaming .xterm-cursor {
+  border-bottom-color: var(--terminal-accent, #8ab4ff) !important;
   opacity: 1 !important;
 }
 
