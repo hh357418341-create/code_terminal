@@ -1351,40 +1351,14 @@ input {
 }
 
 .terminal-host .xterm-cursor {
+  background-color: var(--terminal-accent, #8ab4ff) !important;
   box-shadow:
     0 0 0 1px color-mix(in srgb, var(--terminal-bg, #070b10) 80%, transparent),
-    0 0 10px color-mix(in srgb, var(--terminal-accent, #8ab4ff) 42%, transparent);
-}
-
-.terminal-host.active .xterm.focus .xterm-cursor {
-  outline: 1px solid color-mix(in srgb, #ffffff 44%, var(--terminal-accent, #8ab4ff));
-  outline-offset: -1px;
-}
-
-.terminal-host.active .xterm-cursor.xterm-cursor-blink {
-  animation: terminal-cursor-blink 1.05s steps(2, start) infinite;
+    0 0 0 3px color-mix(in srgb, var(--terminal-accent, #8ab4ff) 22%, transparent);
 }
 
 .terminal-host.terminal-output-streaming .xterm-cursor {
-  animation: none !important;
-  background-color: transparent !important;
-  border: 0 !important;
-  box-shadow: none !important;
-  color: inherit !important;
-  outline: 0 !important;
-  opacity: 0 !important;
-}
-
-@keyframes terminal-cursor-blink {
-  0%,
-  48% {
-    opacity: 1;
-  }
-
-  49%,
-  100% {
-    opacity: 0.28;
-  }
+  opacity: 1 !important;
 }
 
 @media (max-width: 1060px) {

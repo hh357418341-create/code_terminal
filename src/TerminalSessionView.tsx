@@ -1,9 +1,8 @@
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import "@xterm/xterm/css/xterm.css";
+import { invoke, isTauriRuntime, listen } from "./tauriRuntime";
 import { getXtermTheme } from "./terminalThemes";
 import type {
   TerminalAppearanceSettings,
@@ -17,6 +16,8 @@ const outputChunkSize = 4096;
 const outputCursorRevealDelayMs = 2400;
 const resizeDebounceMs = 40;
 const resizeSettleDelays = [80, 180, 360];
+const browserPreviewMessage =
+  "Browser preview mode: native terminal sessions run only inside the Tauri app.";
 
 interface SavedPastedImage {
   path: string;
@@ -487,6 +488,9 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         setSession(started);
         terminal.clear();
         terminal.writeln(`\x1b[38;5;113m${started.shell}\x1b[0m  \x1b[38;5;245m${started.cwd}\x1b[0m`);
+        if (!isTauriRuntime()) {
+          terminal.writeln(`\x1b[38;5;245m${browserPreviewMessage}\x1b[0m`);
+        }
         scheduleFitAndResize();
         await flushPendingCommand(started.sessionId);
       } catch (err) {
@@ -545,8 +549,8 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       const terminal = new XTerm({
         allowProposedApi: false,
         convertEol: false,
-        cursorBlink: true,
-        cursorInactiveStyle: "none",
+        cursorBlink: false,
+        cursorInactiveStyle: "block",
         cursorStyle: "block",
         fontFamily: '"Cascadia Mono", "Cascadia Code", "JetBrains Mono", Consolas, "SFMono-Regular", monospace',
         fontSize: appearance.fontSize,

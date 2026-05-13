@@ -1,6 +1,3 @@
-import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { open } from "@tauri-apps/plugin-dialog";
 import {
   GripVertical,
   ExternalLink,
@@ -14,6 +11,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { invoke, openDialog, setWindowTitle } from "./tauriRuntime";
 import { TerminalPane } from "./TerminalPane";
 import {
   clampTerminalFontSize,
@@ -200,8 +198,7 @@ export function App() {
 
   useEffect(() => {
     const title = currentProject?.name || emptyProjectTitle;
-    document.title = title;
-    getCurrentWindow().setTitle(title).catch(() => undefined);
+    setWindowTitle(title).catch(() => undefined);
   }, [currentProject?.name]);
 
   useEffect(() => {
@@ -238,7 +235,7 @@ export function App() {
 
   async function chooseProject() {
     setError(null);
-    const selected = await open({ directory: true, multiple: false });
+    const selected = await openDialog({ directory: true, multiple: false });
     if (!selected || Array.isArray(selected)) return;
 
     const updated = await invoke<WorkbenchState>("upsert_project", { path: selected });
