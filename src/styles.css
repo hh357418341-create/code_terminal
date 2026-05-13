@@ -1350,30 +1350,8 @@ input {
   background: transparent;
 }
 
-.terminal-host .xterm-cursor {
-  background-color: var(--terminal-accent, #8ab4ff) !important;
-  border: 0 !important;
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--terminal-accent, #8ab4ff) 28%, transparent);
-}
-
-.terminal-host.active .xterm-cursor.xterm-cursor-blink {
-  animation: terminal-input-cursor 1.05s steps(2, start) infinite;
-}
-
 .terminal-host.terminal-output-streaming .xterm-cursor {
   opacity: 1 !important;
-}
-
-@keyframes terminal-input-cursor {
-  0%,
-  54% {
-    opacity: 1;
-  }
-
-  55%,
-  100% {
-    opacity: 0.22;
-  }
 }
 
 @media (max-width: 1060px) {
