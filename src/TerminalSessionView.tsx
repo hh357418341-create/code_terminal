@@ -545,9 +545,9 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       const terminal = new XTerm({
         allowProposedApi: false,
         convertEol: false,
-        cursorBlink: false,
+        cursorBlink: true,
         cursorInactiveStyle: "none",
-        cursorStyle: "underline",
+        cursorStyle: "block",
         fontFamily: '"Cascadia Mono", "Cascadia Code", "JetBrains Mono", Consolas, "SFMono-Regular", monospace',
         fontSize: appearance.fontSize,
         lineHeight: appearance.lineHeight,

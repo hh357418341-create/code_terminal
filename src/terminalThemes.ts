@@ -407,6 +407,7 @@ export function getXtermTheme(appearance: TerminalAppearanceSettings) {
     background: palette.background,
     foreground: palette.foreground,
     cursor: palette.cursor,
+    cursorAccent: palette.background,
     selectionBackground: palette.selectionBackground,
     black: palette.black,
     red: palette.red,
