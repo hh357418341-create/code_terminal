@@ -167,8 +167,13 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
 
     function getTuiContextLabel(usage: TuiContextUsage) {
       const usedPercent = getTuiContextUsedPercent(usage);
+      return `上下文 ${usedPercent}%`;
+    }
+
+    function getTuiContextTitle(usage: TuiContextUsage) {
+      const usedPercent = getTuiContextUsedPercent(usage);
       const leftPercent = 100 - usedPercent;
-      return `会话占用 ${usedPercent}% / 剩余 ${leftPercent}%`;
+      return `上下文占用 ${usedPercent}%，剩余 ${leftPercent}%`;
     }
 
     function stripAnsiSequences(value: string) {
@@ -1221,7 +1226,11 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     }, [commandRequest?.id]);
 
     return (
-      <div className={`terminal-session ${isVisible ? "visible" : ""} ${isActive ? "active" : ""} mode-${viewMode}`}>
+      <div
+        className={`terminal-session ${isVisible ? "visible" : ""} ${isActive ? "active" : ""} ${
+          tuiContextUsage ? "has-context" : ""
+        } mode-${viewMode}`}
+      >
         <div className="terminal-view-switch" role="group" aria-label="显示模式">
           <button
             className={viewMode === "dialog" ? "active" : ""}
@@ -1241,20 +1250,24 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
             终端
           </button>
         </div>
+        {tuiContextUsage ? (
+          <div
+            className="terminal-dialog-context"
+            aria-label={getTuiContextTitle(tuiContextUsage)}
+            title={getTuiContextTitle(tuiContextUsage)}
+          >
+            <span className="terminal-dialog-context-label">{getTuiContextLabel(tuiContextUsage)}</span>
+            <span className="terminal-dialog-context-meter" aria-hidden="true">
+              <span style={{ width: `${getTuiContextUsedPercent(tuiContextUsage)}%` }} />
+            </span>
+          </div>
+        ) : null}
         <div
           className="terminal-dialog-log"
           ref={conversationLogRef}
           aria-hidden={viewMode !== "dialog"}
           aria-label="对话记录"
         >
-          {tuiContextUsage ? (
-            <div className="terminal-dialog-context" aria-label="Codex context usage">
-              <span className="terminal-dialog-context-label">{getTuiContextLabel(tuiContextUsage)}</span>
-              <span className="terminal-dialog-context-meter" aria-hidden="true">
-                <span style={{ width: `${getTuiContextUsedPercent(tuiContextUsage)}%` }} />
-              </span>
-            </div>
-          ) : null}
           {conversationMessages.map((message) => (
             <div className={`terminal-dialog-row ${message.role} ${message.kind ?? "normal"}`} key={message.id}>
               <div className="terminal-dialog-bubble">{message.text}</div>

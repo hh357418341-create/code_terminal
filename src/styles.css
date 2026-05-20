@@ -1481,6 +1481,16 @@ textarea {
   visibility: hidden;
 }
 
+.terminal-session.mode-terminal .terminal-dialog-context {
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+}
+
+.terminal-session.has-context .terminal-dialog-log {
+  padding-top: 58px;
+}
+
 .terminal-view-switch {
   position: absolute;
   top: 10px;
@@ -1529,48 +1539,46 @@ textarea {
 }
 
 .terminal-dialog-context {
-  position: sticky;
-  top: 0;
-  z-index: 3;
+  position: absolute;
+  top: 11px;
+  left: 14px;
+  z-index: 5;
   display: flex;
   align-items: center;
-  gap: 10px;
-  width: fit-content;
-  max-width: min(460px, calc(100% - 104px));
-  min-height: 28px;
-  padding: 5px 8px 5px 10px;
-  color: color-mix(in srgb, var(--terminal-fg, #d8e1e8) 88%, transparent);
-  background: color-mix(in srgb, var(--terminal-bg, #070b10) 88%, transparent);
-  border: 1px solid color-mix(in srgb, var(--terminal-border, #1a2433) 72%, transparent);
-  border-radius: 8px;
-  box-shadow: 0 8px 18px color-mix(in srgb, var(--terminal-bg, #070b10) 36%, transparent);
-  backdrop-filter: blur(8px);
+  gap: 8px;
+  max-width: calc(100% - 118px);
+  height: 24px;
+  padding: 0 8px;
+  color: color-mix(in srgb, var(--terminal-muted, #93a2ae) 92%, var(--terminal-fg, #d8e1e8));
+  background: color-mix(in srgb, var(--terminal-bg, #070b10) 66%, transparent);
+  border: 1px solid color-mix(in srgb, var(--terminal-border, #1a2433) 54%, transparent);
+  border-radius: 7px;
 }
 
 .terminal-dialog-context-label {
   min-width: 0;
   overflow: hidden;
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 700;
-  line-height: 1.2;
+  line-height: 1;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .terminal-dialog-context-meter {
   position: relative;
-  width: 86px;
-  height: 5px;
+  width: 52px;
+  height: 4px;
   flex: 0 0 auto;
   overflow: hidden;
-  background: color-mix(in srgb, var(--terminal-fg, #d8e1e8) 12%, transparent);
+  background: color-mix(in srgb, var(--terminal-fg, #d8e1e8) 10%, transparent);
   border-radius: 999px;
 }
 
 .terminal-dialog-context-meter span {
   display: block;
   height: 100%;
-  background: var(--terminal-accent, #8ab4ff);
+  background: color-mix(in srgb, var(--terminal-accent, #8ab4ff) 82%, var(--terminal-fg, #d8e1e8));
   border-radius: inherit;
 }
 
@@ -1840,12 +1848,20 @@ textarea {
     padding: 38px 8px 8px;
   }
 
+  .terminal-session.has-context .terminal-dialog-log {
+    padding-top: 46px;
+  }
+
   .terminal-dialog-context {
+    top: 8px;
+    left: 8px;
     max-width: calc(100% - 88px);
+    height: 22px;
+    padding: 0 7px;
   }
 
   .terminal-dialog-context-meter {
-    width: 58px;
+    width: 42px;
   }
 
   .terminal-composer {
@@ -1931,6 +1947,10 @@ textarea {
     padding: 38px 10px 8px;
   }
 
+  .terminal-session.has-context .terminal-dialog-log {
+    padding-top: 44px;
+  }
+
   .terminal-composer {
     grid-template-columns: minmax(0, 1fr) 36px;
     gap: 8px;
@@ -1983,20 +2003,25 @@ textarea {
   }
 
   .terminal-dialog-log {
-    padding: 36px 8px 6px;
+    padding: 34px 8px 6px;
+  }
+
+  .terminal-session.has-context .terminal-dialog-log {
+    padding-top: 38px;
   }
 
   .terminal-dialog-context {
-    min-height: 24px;
-    padding: 4px 7px;
+    top: 6px;
+    height: 20px;
+    padding: 0 6px;
   }
 
   .terminal-dialog-context-label {
-    font-size: 10.5px;
+    font-size: 10px;
   }
 
   .terminal-dialog-context-meter {
-    width: 48px;
+    width: 36px;
   }
 
   .terminal-composer {
