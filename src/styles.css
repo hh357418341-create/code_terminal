@@ -1528,6 +1528,52 @@ textarea {
   background: transparent;
 }
 
+.terminal-dialog-context {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: fit-content;
+  max-width: min(460px, calc(100% - 104px));
+  min-height: 28px;
+  padding: 5px 8px 5px 10px;
+  color: color-mix(in srgb, var(--terminal-fg, #d8e1e8) 88%, transparent);
+  background: color-mix(in srgb, var(--terminal-bg, #070b10) 88%, transparent);
+  border: 1px solid color-mix(in srgb, var(--terminal-border, #1a2433) 72%, transparent);
+  border-radius: 8px;
+  box-shadow: 0 8px 18px color-mix(in srgb, var(--terminal-bg, #070b10) 36%, transparent);
+  backdrop-filter: blur(8px);
+}
+
+.terminal-dialog-context-label {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.terminal-dialog-context-meter {
+  position: relative;
+  width: 86px;
+  height: 5px;
+  flex: 0 0 auto;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--terminal-fg, #d8e1e8) 12%, transparent);
+  border-radius: 999px;
+}
+
+.terminal-dialog-context-meter span {
+  display: block;
+  height: 100%;
+  background: var(--terminal-accent, #8ab4ff);
+  border-radius: inherit;
+}
+
 .terminal-dialog-row {
   display: flex;
   width: 100%;
@@ -1790,6 +1836,18 @@ textarea {
     padding: 7px 8px;
   }
 
+  .terminal-dialog-log {
+    padding: 38px 8px 8px;
+  }
+
+  .terminal-dialog-context {
+    max-width: calc(100% - 88px);
+  }
+
+  .terminal-dialog-context-meter {
+    width: 58px;
+  }
+
   .terminal-composer {
     grid-template-columns: minmax(0, 1fr) 38px;
     gap: 7px;
@@ -1869,6 +1927,10 @@ textarea {
     padding: 8px 10px;
   }
 
+  .terminal-dialog-log {
+    padding: 38px 10px 8px;
+  }
+
   .terminal-composer {
     grid-template-columns: minmax(0, 1fr) 36px;
     gap: 8px;
@@ -1918,6 +1980,23 @@ textarea {
 
   .terminal-host .xterm {
     padding: 6px 8px;
+  }
+
+  .terminal-dialog-log {
+    padding: 36px 8px 6px;
+  }
+
+  .terminal-dialog-context {
+    min-height: 24px;
+    padding: 4px 7px;
+  }
+
+  .terminal-dialog-context-label {
+    font-size: 10.5px;
+  }
+
+  .terminal-dialog-context-meter {
+    width: 48px;
   }
 
   .terminal-composer {

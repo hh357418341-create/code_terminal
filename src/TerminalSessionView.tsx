@@ -23,6 +23,7 @@ const conversationOutputMergeWindowMs = 1200;
 const maxConversationMessages = 160;
 const liveTuiSnapshotDebounceMs = 80;
 const maxLiveTuiSnapshotChars = 6000;
+const composerSubmitDelayMs = 0;
 const codexStatusWords = ["Working", "Thinking", "Reading", "Editing", "Running"];
 
 type ConversationRole = "user" | "terminal";
@@ -36,6 +37,11 @@ interface ConversationMessage {
   text: string;
   createdAt: number;
   updatedAt: number;
+}
+
+interface TuiContextUsage {
+  percent: number;
+  mode: "left" | "used";
 }
 
 export interface TerminalSessionRuntime {
@@ -103,9 +109,11 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     const liveTuiSnapshotTimerRef = useRef<number | null>(null);
     const liveTuiOutputQueuedRef = useRef(false);
     const liveTuiSnapshotStartRowRef = useRef<number | null>(null);
+    const pendingSubmitTimerRef = useRef<number | null>(null);
     const [session, setSession] = useState<TerminalStarted | null>(null);
     const [isStarting, setIsStarting] = useState(false);
     const [conversationMessages, setConversationMessages] = useState<ConversationMessage[]>([]);
+    const [tuiContextUsage, setTuiContextUsage] = useState<TuiContextUsage | null>(null);
     const [viewMode, setViewMode] = useState<TerminalViewMode>("dialog");
 
     function shouldSuppressTerminalError(err: unknown) {
@@ -127,6 +135,40 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       return typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
         ? crypto.randomUUID()
         : `${Date.now()}-${Math.random()}`;
+    }
+
+    function parseTuiContextUsage(value: string) {
+      const text = stripAnsiSequences(value).replace(/\s+/g, " ");
+      const match = text.match(/\bContext\s+(\d{1,3})%\s+(left|used)\b/i);
+      if (!match) return null;
+
+      return {
+        percent: Math.min(Math.max(Number(match[1]), 0), 100),
+        mode: match[2].toLowerCase() === "used" ? "used" : "left",
+      } satisfies TuiContextUsage;
+    }
+
+    function updateTuiContextUsageFromText(value: string) {
+      const usage = parseTuiContextUsage(value);
+      if (!usage) return;
+
+      setTuiContextUsage((current) => {
+        if (current?.percent === usage.percent && current.mode === usage.mode) {
+          return current;
+        }
+
+        return usage;
+      });
+    }
+
+    function getTuiContextUsedPercent(usage: TuiContextUsage) {
+      return usage.mode === "used" ? usage.percent : 100 - usage.percent;
+    }
+
+    function getTuiContextLabel(usage: TuiContextUsage) {
+      const usedPercent = getTuiContextUsedPercent(usage);
+      const leftPercent = 100 - usedPercent;
+      return `会话占用 ${usedPercent}% / 剩余 ${leftPercent}%`;
     }
 
     function stripAnsiSequences(value: string) {
@@ -490,7 +532,9 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         }
       }
 
-      return formatTerminalSnapshotText(lines.join("\n"));
+      const screenText = lines.join("\n");
+      updateTuiContextUsageFromText(screenText);
+      return formatTerminalSnapshotText(screenText);
     }
 
     function clearLiveTuiSnapshotTimer() {
@@ -505,6 +549,13 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       liveTuiMessageIdRef.current = null;
       liveTuiOutputQueuedRef.current = false;
       liveTuiSnapshotStartRowRef.current = null;
+    }
+
+    function clearPendingSubmitTimer() {
+      if (!pendingSubmitTimerRef.current) return;
+
+      window.clearTimeout(pendingSubmitTimerRef.current);
+      pendingSubmitTimerRef.current = null;
     }
 
     function markLiveTuiSnapshotStart() {
@@ -644,6 +695,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       outputQueueRef.current = [];
       outputWriterActiveRef.current = false;
       resetLiveTuiSnapshotState();
+      setTuiContextUsage(null);
       if (outputCursorTimerRef.current) {
         window.clearTimeout(outputCursorTimerRef.current);
         outputCursorTimerRef.current = null;
@@ -728,6 +780,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     function enqueueTerminalOutput(data: string) {
       if (!data) return;
 
+      updateTuiContextUsageFromText(data);
       const terminal = terminalRef.current;
       const activeAlternateBuffer = terminal?.buffer.active.type === "alternate";
       const isAlternateBufferExitOnly =
@@ -774,22 +827,6 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       return `${normalizedInput.replace(/\n/g, "\r")}\r`;
     }
 
-    function formatComposerInput(input: string) {
-      const terminal = terminalRef.current;
-      const normalizedInput = normalizeInput(input);
-      if (!normalizedInput.trim()) return "";
-
-      if (!normalizedInput.includes("\n")) {
-        return `${normalizedInput}\r`;
-      }
-
-      if (terminal?.modes.bracketedPasteMode) {
-        return `\x1b[200~${normalizedInput}\x1b[201~\r`;
-      }
-
-      return `${normalizedInput.replace(/\n/g, "\r")}\r`;
-    }
-
     function sendRawOrQueueInput(data: string) {
       if (!data) return;
 
@@ -800,6 +837,38 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
 
       pendingRawInputRef.current = `${pendingRawInputRef.current ?? ""}${data}`;
       void startSession();
+    }
+
+    function submitRawOrQueueInput(data: string) {
+      clearPendingSubmitTimer();
+
+      if (sessionIdRef.current) {
+        pendingSubmitTimerRef.current = window.setTimeout(() => {
+          pendingSubmitTimerRef.current = null;
+          writeRawTerminalInput(data);
+        }, composerSubmitDelayMs);
+        return;
+      }
+
+      pendingRawInputRef.current = `${pendingRawInputRef.current ?? ""}${data}`;
+      void startSession();
+    }
+
+    function sendComposerInputToTerminal(input: string) {
+      const terminal = terminalRef.current;
+      const normalizedInput = normalizeInput(input);
+      if (!normalizedInput.trim()) return;
+
+      if (terminal?.modes.bracketedPasteMode) {
+        sendRawOrQueueInput(`\x1b[200~${normalizedInput}\x1b[201~`);
+        submitRawOrQueueInput("\r");
+        return;
+      }
+
+      const data = normalizedInput.includes("\n")
+        ? `${normalizedInput.replace(/\n/g, "\r")}\r`
+        : `${normalizedInput}\r`;
+      sendRawOrQueueInput(data);
     }
 
     function isPasteShortcut(event: KeyboardEvent) {
@@ -818,6 +887,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       pendingRawInputRef.current = null;
       lastResizeRef.current = null;
       isLifecycleStoppingRef.current = true;
+      clearPendingSubmitTimer();
       setSession(null);
       clearOutputQueue();
       if (sessionId) {
@@ -988,7 +1058,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       },
       sendComposerInput(input: string) {
         appendConversationMessage("user", input);
-        sendRawOrQueueInput(formatComposerInput(input));
+        sendComposerInputToTerminal(input);
       },
     }));
 
@@ -1105,6 +1175,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
 
       return () => {
         clearScheduledResize();
+        clearPendingSubmitTimer();
         resizeObserver.disconnect();
         window.removeEventListener("resize", scheduleFitAndResize);
         document.removeEventListener("fullscreenchange", scheduleFitAndResize);
@@ -1176,6 +1247,14 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
           aria-hidden={viewMode !== "dialog"}
           aria-label="对话记录"
         >
+          {tuiContextUsage ? (
+            <div className="terminal-dialog-context" aria-label="Codex context usage">
+              <span className="terminal-dialog-context-label">{getTuiContextLabel(tuiContextUsage)}</span>
+              <span className="terminal-dialog-context-meter" aria-hidden="true">
+                <span style={{ width: `${getTuiContextUsedPercent(tuiContextUsage)}%` }} />
+              </span>
+            </div>
+          ) : null}
           {conversationMessages.map((message) => (
             <div className={`terminal-dialog-row ${message.role} ${message.kind ?? "normal"}`} key={message.id}>
               <div className="terminal-dialog-bubble">{message.text}</div>
