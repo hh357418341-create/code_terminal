@@ -133,7 +133,6 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     const liveTuiOutputQueuedRef = useRef(false);
     const liveTuiSnapshotStartRowRef = useRef<number | null>(null);
     const liveTuiTranscriptRowsRef = useRef<ConversationLine[]>([]);
-    const codexWelcomeMessageIdRef = useRef<string | null>(null);
     const dialogConversationStartedRef = useRef(false);
     const pendingSubmitTimerRef = useRef<number | null>(null);
     const [session, setSession] = useState<TerminalStarted | null>(null);
@@ -344,20 +343,23 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       });
     }
 
+    function isRecentCodexPromptEchoFragment(line: string) {
+      const promptMatch = normalizeEchoComparison(line).match(/^[>›]\s*(.+)$/);
+      const promptText = promptMatch?.[1];
+      if (!promptText) return false;
+
+      return recentUserInputsRef.current.some((input) => {
+        const normalizedInput = normalizeEchoComparison(input);
+        return Boolean(normalizedInput && promptText !== normalizedInput && normalizedInput.startsWith(promptText));
+      });
+    }
+
     function hasCodexTuiChrome(lines: string[]) {
       return lines.some((line) => {
         const normalizedLine = normalizeEchoComparison(line);
         return (
-          isCodexTuiWelcomeOrPromptChromeLine(normalizedLine) ||
-          /^╭|^╰|^│/.test(normalizedLine) ||
-          /\bOpenAI Codex\b/i.test(normalizedLine) ||
-          /\b(model|directory|permissions):/i.test(normalizedLine) ||
-          /\bTip:\b/i.test(normalizedLine) ||
           /\besc to interrupt\b/i.test(normalizedLine) ||
-          /\bContext\s+\d+%\s+(?:left|used)\b/i.test(normalizedLine) ||
-          /\bgpt-[\w.-]+/i.test(normalizedLine) ||
-          /[>›]\s*Improve\b/i.test(normalizedLine) ||
-          /@filename/i.test(normalizedLine)
+          /\bContext\s+\d+%\s+(?:left|used)\b/i.test(normalizedLine)
         );
       });
     }
@@ -417,40 +419,27 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       return false;
     }
 
-    function isCodexTuiWelcomeOrPromptChromeLine(line: string) {
-      const text = normalizeEchoComparison(line);
+    function isCodexDefaultPromptSuggestion(line: string) {
+      const text = normalizeEchoComparison(line.replace(/^[>›]\s*/, ""));
       if (!text) return false;
 
       return (
-        /\bOpenAI Codex\b/i.test(text) ||
-        /\bBuild faster with Codex\b/i.test(text) ||
-        /\bUse \/skills\b/i.test(text) ||
-        /\bUse \/status\b/i.test(text) ||
-        /\bcurrent model,\s*approvals,\s*and token usage\b/i.test(text) ||
-        /\bapprovals,\s*and token usage\b/i.test(text) ||
-        /\bYou can resume a previous conversation\b/i.test(text) ||
-        /^Tip:?\b/i.test(text) ||
-        /^by running\b/i.test(text) ||
-        /^codex resume$/i.test(text) ||
-        /^code$/i.test(text) ||
-        /\bSummarize recent commits\b/i.test(text) ||
-        /\bFind and fix a bug in @filename\b/i.test(text) ||
-        /\bImprove documentation in @filename\b/i.test(text)
+        /^Implement\s+\{feature\}$/i.test(text) ||
+        /^Improve documentation in @filename$/i.test(text) ||
+        /^Find and fix a bug in @filename$/i.test(text) ||
+        /^Summarize recent commits$/i.test(text) ||
+        /^Use \/skills to list available skills$/i.test(text) ||
+        /^Run \/review on my current changes$/i.test(text) ||
+        /^Use \/status to see\b/i.test(text)
       );
     }
 
     function cleanCodexTuiChromeLine(line: string, shouldCleanCodexChrome: boolean) {
+      if (!dialogConversationStartedRef.current && /^\s*[>›]\s+/.test(line)) return "";
+      if (isCodexDefaultPromptSuggestion(line)) return "";
       if (!shouldCleanCodexChrome) return line;
 
       let text = line.trimEnd();
-      if (/^[╭╰─│\s>_OpenAI Codex().v0-9]+$/.test(text)) return "";
-      if (/^\s*│/.test(text)) return "";
-      if (/^\s*╭/.test(text) || /^\s*╰/.test(text)) return "";
-      if (isCodexTuiWelcomeOrPromptChromeLine(text)) return "";
-      if (/\bOpenAI Codex\b/i.test(text)) return "";
-      if (/\b(model|directory|permissions):/i.test(text)) return "";
-      if (/\bTip:\b/i.test(text)) return "";
-      text = text.replace(/[>›]\s*Improve.*$/i, "").trimEnd();
       text = text.replace(/\([^)]*\besc to interrupt\b[^)]*\)/gi, "").trimEnd();
 
       const statusInFooter = text.match(/\b(Working|Thinking|Reading|Editing|Running)\b\s*$/i);
@@ -458,10 +447,8 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         return statusInFooter ? statusInFooter[1] : "";
       }
 
-      if (/^\s*>/.test(text)) return "";
       if (/\besc to interrupt\b/i.test(text)) return "";
       if (isCodexTuiNoiseLine(text, shouldCleanCodexChrome)) return "";
-      text = text.replace(/^\s*[•●◦○]\s+/, "").trimEnd();
 
       return text;
     }
@@ -471,17 +458,9 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       if (!text) return false;
 
       return (
-        isCodexTuiWelcomeOrPromptChromeLine(text) ||
-        /^╭|^╰|^│/.test(text) ||
-        /\bOpenAI Codex\b/i.test(text) ||
-        /\b(model|directory|permissions):/i.test(text) ||
-        /\bTip:\b/i.test(text) ||
-        /^[>›]/.test(text) ||
+        isCodexDefaultPromptSuggestion(text) ||
         /\besc to interrupt\b/i.test(text) ||
-        /\bContext\s+\d+%\s+(?:left|used)\b/i.test(text) ||
-        /\bgpt-[\w.-]+/i.test(text) ||
-        /[>›]\s*Improve\b/i.test(text) ||
-        /@filename/i.test(text)
+        /\bContext\s+\d+%\s+(?:left|used)\b/i.test(text)
       );
     }
 
@@ -571,94 +550,6 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       }
 
       return compactRows;
-    }
-
-    function stripCodexWelcomeBoxLine(line: string) {
-      return line
-        .trim()
-        .replace(/^[│|]\s*/, "")
-        .replace(/\s*[│|]$/, "")
-        .replace(/^>_\s*/, "")
-        .replace(/\s{2,}/g, " ")
-        .trim();
-    }
-
-    function extractCodexWelcomeRows(rows: ConversationLine[]) {
-      const lines = rows.map((row) => stripCodexWelcomeBoxLine(row.text)).filter(Boolean);
-      if (!lines.some((line) => /\bOpenAI Codex\b/i.test(line))) return [];
-
-      const titleLine = lines.find((line) => /\bOpenAI Codex\b/i.test(line));
-      const titleMatch = titleLine?.match(/\bOpenAI Codex\s*(\([^)]*\))?/i);
-      const title = titleMatch ? `OpenAI Codex ${titleMatch[1] ?? ""}`.trim() : "OpenAI Codex";
-      const model = lines
-        .find((line) => /^model:/i.test(line))
-        ?.replace(/^model:\s*/i, "")
-        .replace(/\s+\/model\b.*$/i, "")
-        .trim();
-      const directory = lines
-        .find((line) => /^directory:/i.test(line))
-        ?.replace(/^directory:\s*/i, "")
-        .trim();
-      const permissions = lines
-        .find((line) => /^permissions:/i.test(line))
-        ?.replace(/^permissions:\s*/i, "")
-        .trim();
-      const tipIndex = lines.findIndex((line) => /^Tip:?\b/i.test(line));
-      const tip =
-        tipIndex >= 0
-          ? lines[tipIndex].replace(/^Tip:?\s*/i, "").trim() || lines[tipIndex + 1]?.replace(/^[›>]\s*/, "").trim()
-          : "";
-      const welcomeRows: ConversationLine[] = [{ text: title }];
-
-      if (model) welcomeRows.push({ text: `model: ${model}`, muted: true });
-      if (directory) welcomeRows.push({ text: `directory: ${directory}`, muted: true });
-      if (permissions) welcomeRows.push({ text: `permissions: ${permissions}`, muted: true });
-      if (tip) welcomeRows.push({ text: `Tip: ${tip}`, muted: true });
-
-      return welcomeRows;
-    }
-
-    function upsertCodexWelcomeMessage(rows: ConversationLine[]) {
-      const welcomeRows = extractCodexWelcomeRows(rows);
-      const welcomeText = buildTextFromRows(welcomeRows);
-      if (!welcomeText.trim()) return false;
-
-      const now = Date.now();
-      const messageId = codexWelcomeMessageIdRef.current ?? createConversationId();
-      codexWelcomeMessageIdRef.current = messageId;
-
-      setConversationMessages((current) => {
-        const existingIndex = current.findIndex((message) => message.id === messageId);
-        if (existingIndex >= 0) {
-          const existing = current[existingIndex];
-          if (existing.text === welcomeText && areConversationLinesEqual(existing.lines, welcomeRows)) {
-            return current;
-          }
-
-          const nextMessages = [...current];
-          nextMessages[existingIndex] = {
-            ...existing,
-            text: welcomeText,
-            lines: welcomeRows,
-            updatedAt: now,
-          };
-          return nextMessages;
-        }
-
-        const nextMessage: ConversationMessage = {
-          id: messageId,
-          role: "terminal",
-          kind: "tui",
-          text: welcomeText,
-          lines: welcomeRows,
-          createdAt: now,
-          updatedAt: now,
-        };
-
-        return [...current, nextMessage].slice(-maxConversationMessages);
-      });
-
-      return true;
     }
 
     function countLeadingWhitespaceColumns(text: string) {
@@ -854,10 +745,36 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       return null;
     }
 
+    function getRecentInputPromptNormalizedRows() {
+      return recentUserInputsRef.current.map((input) => normalizeEchoComparison(`› ${input}`)).filter(Boolean);
+    }
+
+    function replaceTranscriptFromRepeatedPrompt(previousRows: ConversationLine[], nextRows: ConversationLine[]) {
+      const promptRows = getRecentInputPromptNormalizedRows();
+      if (promptRows.length === 0) return null;
+
+      const previousNormalized = previousRows.map(normalizeTranscriptComparison);
+      const nextNormalized = nextRows.map(normalizeTranscriptComparison);
+      const nextPromptIndex = nextNormalized.findIndex((line) => promptRows.includes(line));
+      if (nextPromptIndex < 0) return null;
+
+      const promptLine = nextNormalized[nextPromptIndex];
+      const previousPromptIndex = previousNormalized.lastIndexOf(promptLine);
+      if (previousPromptIndex < 0) return null;
+
+      return truncateLiveTuiTranscriptRows([
+        ...previousRows.slice(0, previousPromptIndex),
+        ...nextRows.slice(nextPromptIndex),
+      ]);
+    }
+
     function mergeTuiTranscriptRows(previousRows: ConversationLine[], nextRows: ConversationLine[]) {
       const normalizedNextRows = trimConversationRows(nextRows);
       if (normalizedNextRows.length === 0) return previousRows;
       if (previousRows.length === 0) return truncateLiveTuiTranscriptRows(normalizedNextRows);
+
+      const repeatedPromptRows = replaceTranscriptFromRepeatedPrompt(previousRows, normalizedNextRows);
+      if (repeatedPromptRows) return repeatedPromptRows;
 
       const previousNormalized = previousRows.map(normalizeTranscriptComparison);
       const nextNormalized = normalizedNextRows.map(normalizeTranscriptComparison);
@@ -973,6 +890,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
           return (
             !trimmedLine ||
             (!recentUserInputs.has(trimmedLine) &&
+              !isRecentCodexPromptEchoFragment(row.text) &&
               (getCodexStatusFragmentWord(trimmedLine) ||
                 !isRecentInputSnapshotEchoFragment(row.text, shouldCleanCodexChrome)))
           );
@@ -1090,13 +1008,10 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     }
 
     function upsertLiveTuiMessage(rows: ConversationLine[]) {
-      const hasCodexWelcome = upsertCodexWelcomeMessage(rows);
-      if (!dialogConversationStartedRef.current && !hasCodexWelcome) return;
-
       const normalizedRows = normalizeSnapshotRows(rows);
-      const nextTranscriptRows = compactConversationRows(
-        mergeTuiTranscriptRows(liveTuiTranscriptRowsRef.current, normalizedRows),
-      );
+      const nextTranscriptRows = dialogConversationStartedRef.current
+        ? compactConversationRows(mergeTuiTranscriptRows(liveTuiTranscriptRowsRef.current, normalizedRows))
+        : normalizedRows;
       const nextTranscriptText = buildTextFromRows(nextTranscriptRows);
       if (!nextTranscriptText.trim()) return;
 
@@ -1271,11 +1186,6 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       outputQueueRef.current = [];
       outputWriterActiveRef.current = false;
       resetLiveTuiSnapshotState();
-      if (codexWelcomeMessageIdRef.current) {
-        const messageId = codexWelcomeMessageIdRef.current;
-        codexWelcomeMessageIdRef.current = null;
-        setConversationMessages((current) => current.filter((message) => message.id !== messageId));
-      }
       setTuiContextUsage(null);
       if (outputCursorTimerRef.current) {
         window.clearTimeout(outputCursorTimerRef.current);
@@ -1881,7 +1791,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
             aria-label="对话记录"
           >
             {conversationMessages
-              .filter((message) => viewMode !== "dialog" || message.role === "user" || message.kind === "tui")
+              .filter((message) => viewMode !== "dialog" || message.kind === "tui")
               .map((message) => (
                 <div className={`terminal-dialog-row ${message.role} ${message.kind ?? "normal"}`} key={message.id}>
                   <div className="terminal-dialog-bubble">{renderConversationText(message)}</div>
