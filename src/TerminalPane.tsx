@@ -1,6 +1,5 @@
 import {
   Ban,
-  Keyboard,
   PanelTop,
   Plus,
   RotateCcw,
@@ -49,7 +48,6 @@ interface TerminalTabsState {
 }
 
 type TerminalDisplayMode = "tabs" | "tiles";
-type ComposerMode = "command" | "text";
 type TerminalDockZone = "top" | "right" | "bottom" | "left" | "center";
 type TerminalFocusTarget = "composer" | "terminal" | "none";
 type ResizeAxis = "column" | "row";
@@ -401,7 +399,6 @@ export function TerminalPane({
     request: TerminalCommandRequest;
   } | null>(null);
   const [composerInputValue, setComposerInputValue] = useState("");
-  const [composerMode, setComposerMode] = useState<ComposerMode>("command");
   const activeProjectBinding = useMemo(
     () => ({
       id: activeProjectId || null,
@@ -442,17 +439,13 @@ export function TerminalPane({
   }
 
   function submitComposerInput() {
-    const value = composerMode === "command" ? composerInputValue.trimEnd() : composerInputValue;
+    const value = composerInputValue.trimEnd();
     if (!value) return;
 
     const activeTerminal = terminalHandlesRef.current[terminalTabs.activeTabId];
     if (!activeTerminal) return;
 
-    if (composerMode === "command") {
-      activeTerminal.sendCommand(value);
-    } else {
-      activeTerminal.sendText(value);
-    }
+    activeTerminal.sendComposerInput(value);
     setComposerInputValue("");
     focusActiveTerminal();
   }
@@ -1156,7 +1149,7 @@ export function TerminalPane({
       </div>
 
       <form
-        className={`terminal-composer ${composerMode}`}
+        className="terminal-composer"
         aria-label="对话输入"
         onSubmit={(event) => {
           event.preventDefault();
@@ -1164,26 +1157,6 @@ export function TerminalPane({
         }}
       >
         <div className="terminal-composer-toolbar">
-          <div className="terminal-composer-mode" aria-label="输入模式">
-            <button
-              className={`terminal-composer-mode-button ${composerMode === "command" ? "active" : ""}`}
-              title="命令模式：Enter 直接发送到当前终端"
-              type="button"
-              onClick={() => setComposerMode("command")}
-            >
-              <Terminal size={13} />
-              <span>命令</span>
-            </button>
-            <button
-              className={`terminal-composer-mode-button ${composerMode === "text" ? "active" : ""}`}
-              title="文本模式：Shift+Enter 换行，Enter 发送给 TUI"
-              type="button"
-              onClick={() => setComposerMode("text")}
-            >
-              <Keyboard size={13} />
-              <span>文本</span>
-            </button>
-          </div>
           <div className="terminal-composer-controls">
             <button
               className="terminal-composer-control"
@@ -1229,7 +1202,7 @@ export function TerminalPane({
           ref={composerInputRef}
           className="terminal-composer-input"
           aria-label="输入内容"
-          placeholder={composerMode === "command" ? "输入命令" : "输入给 TUI"}
+          placeholder="输入给当前会话"
           rows={2}
           value={composerInputValue}
           onChange={(event) => setComposerInputValue(event.target.value)}

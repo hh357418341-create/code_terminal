@@ -1006,26 +1006,16 @@ textarea {
   display: flex;
   grid-column: 1 / -1;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 10px;
   min-width: 0;
 }
 
-.terminal-composer-mode,
 .terminal-composer-controls {
   display: flex;
   align-items: center;
   gap: 4px;
   min-width: 0;
-}
-
-.terminal-composer-mode {
-  flex: 0 0 auto;
-  min-height: 30px;
-  padding: 2px;
-  background: color-mix(in srgb, var(--terminal-fg, #d8e1e8) 7%, transparent);
-  border: 1px solid color-mix(in srgb, var(--terminal-border, #24313a) 68%, transparent);
-  border-radius: 8px;
 }
 
 .terminal-composer-controls {
@@ -1049,7 +1039,6 @@ textarea {
   background: transparent;
 }
 
-.terminal-composer-mode-button,
 .terminal-composer-control {
   display: inline-flex;
   align-items: center;
@@ -1071,10 +1060,6 @@ textarea {
     opacity 140ms ease;
 }
 
-.terminal-composer-mode-button {
-  padding: 0 8px;
-}
-
 .terminal-composer-control {
   padding: 0 9px;
   color: var(--terminal-fg, #d8e1e8);
@@ -1082,15 +1067,9 @@ textarea {
   border: 1px solid color-mix(in srgb, var(--terminal-border, #24313a) 58%, transparent);
 }
 
-.terminal-composer-mode-button:hover,
-.terminal-composer-mode-button.active,
 .terminal-composer-control:hover {
   color: var(--terminal-fg, #d8e1e8);
   background: color-mix(in srgb, var(--terminal-fg, #d8e1e8) 14%, transparent);
-}
-
-.terminal-composer-mode-button.active {
-  color: var(--terminal-accent, #8ab4ff);
 }
 
 .terminal-composer-control:disabled {
@@ -1688,11 +1667,6 @@ textarea {
     gap: 6px;
   }
 
-  .terminal-composer-mode {
-    min-height: 26px;
-  }
-
-  .terminal-composer-mode-button,
   .terminal-composer-control {
     min-height: 22px;
     padding: 0 7px;
@@ -1753,18 +1727,12 @@ textarea {
     align-items: stretch;
   }
 
-  .terminal-composer-mode {
-    min-height: 24px;
-  }
-
-  .terminal-composer-mode-button,
   .terminal-composer-control {
     min-width: 26px;
     min-height: 22px;
     padding: 0 6px;
   }
 
-  .terminal-composer-mode-button span,
   .terminal-composer-control span {
     display: none;
   }

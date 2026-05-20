@@ -34,8 +34,7 @@ export interface TerminalSessionHandle {
   focus: () => void;
   fit: () => void;
   interrupt: () => void;
-  sendCommand: (input: string) => void;
-  sendText: (input: string) => void;
+  sendComposerInput: (input: string) => void;
 }
 
 interface TerminalSessionViewProps {
@@ -207,7 +206,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       return `${normalizedInput.replace(/\n/g, "\r")}\r`;
     }
 
-    function formatTextInput(input: string) {
+    function formatComposerInput(input: string) {
       const terminal = terminalRef.current;
       const normalizedInput = normalizeInput(input);
       if (!normalizedInput.trim()) return "";
@@ -442,11 +441,8 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         discardQueuedOutput();
         writeRawTerminalInput("\x03");
       },
-      sendCommand(input: string) {
-        sendRawOrQueueInput(formatCommandInput(input));
-      },
-      sendText(input: string) {
-        sendRawOrQueueInput(formatTextInput(input));
+      sendComposerInput(input: string) {
+        sendRawOrQueueInput(formatComposerInput(input));
       },
     }));
 
