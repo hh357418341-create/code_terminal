@@ -202,13 +202,15 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       return normalizedInput.replace(/\n/g, "\r");
     }
 
-    function echoComposerInput(input: string) {
+    function sendInputThroughTerminal(input: string) {
       const terminal = terminalRef.current;
       const normalizedInput = input.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-      if (!terminal || normalizedInput.includes("\n")) return;
+      if (terminal) {
+        terminal.paste(`${normalizedInput}\r`);
+        return;
+      }
 
-      terminal.writeln("");
-      terminal.writeln(`\x1b[38;5;113m$ ${normalizedInput}\x1b[0m`);
+      writeRawTerminalInput(`${formatDialogInputForTerminal(input)}\r`);
     }
 
     function getClipboardImageItem(dataTransfer: DataTransfer | null) {
@@ -258,17 +260,11 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
 
     async function flushPendingCommand(sessionId: string) {
       const command = pendingCommandRef.current;
-      const terminal = terminalRef.current;
       if (!command) return;
 
       pendingCommandRef.current = null;
-      terminal?.writeln("");
-      terminal?.writeln(`\x1b[38;5;113m$ ${command}\x1b[0m`);
-
-      await invoke("terminal_write", {
-        sessionId,
-        data: `${command}\r`,
-      }).catch(reportTerminalError);
+      void sessionId;
+      sendInputThroughTerminal(command);
     }
 
     function applyWindowsPtyOptions(started: TerminalStarted) {
@@ -416,11 +412,9 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         scheduleFitAndResize();
       },
       sendDialogInput(input: string) {
-        const formattedInput = formatDialogInputForTerminal(input);
         const sessionId = sessionIdRef.current;
         if (sessionId) {
-          echoComposerInput(input);
-          writeRawTerminalInput(`${formattedInput}\r`);
+          sendInputThroughTerminal(input);
           return;
         }
 
@@ -459,7 +453,6 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         cursorInactiveStyle: "none",
         cursorStyle: "bar",
         cursorWidth: 2,
-        disableStdin: true,
         fontFamily: '"Cascadia Mono", "Cascadia Code", "JetBrains Mono", Consolas, "SFMono-Regular", monospace',
         fontSize: appearance.fontSize,
         lineHeight: appearance.lineHeight,
