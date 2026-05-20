@@ -15,7 +15,6 @@ import type {
 
 const outputChunkSize = 4096;
 const outputCursorRevealDelayMs = 2400;
-const liveTerminalRevealMs = 4200;
 const resizeDebounceMs = 40;
 const resizeSettleDelays = [80, 180, 360];
 const browserPreviewMessage =
@@ -24,6 +23,7 @@ const conversationOutputMergeWindowMs = 1200;
 const maxConversationMessages = 160;
 
 type ConversationRole = "user" | "terminal";
+type TerminalViewMode = "dialog" | "terminal";
 
 interface ConversationMessage {
   id: string;
@@ -90,8 +90,6 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     const outputQueueRef = useRef<string[]>([]);
     const outputWriterActiveRef = useRef(false);
     const outputCursorTimerRef = useRef<number | null>(null);
-    const liveTerminalTimerRef = useRef<number | null>(null);
-    const liveTerminalUntilRef = useRef(0);
     const outputCursorSuppressedRef = useRef(false);
     const lastResizeRef = useRef<{ cols: number; rows: number } | null>(null);
     const recentUserInputsRef = useRef<string[]>([]);
@@ -99,6 +97,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     const [session, setSession] = useState<TerminalStarted | null>(null);
     const [isStarting, setIsStarting] = useState(false);
     const [conversationMessages, setConversationMessages] = useState<ConversationMessage[]>([]);
+    const [viewMode, setViewMode] = useState<TerminalViewMode>("dialog");
 
     function shouldSuppressTerminalError(err: unknown) {
       const message = String(err);
@@ -171,23 +170,11 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     }
 
     function shouldUseLiveTerminalOutput(value: string) {
-      return Date.now() < liveTerminalUntilRef.current || hasDynamicTerminalControl(value) || looksLikeCodexStatusFrame(value);
+      return hasDynamicTerminalControl(value) || looksLikeCodexStatusFrame(value);
     }
 
-    function revealLiveTerminalForDynamicOutput() {
-      const host = hostRef.current;
-      if (!host) return;
-
-      liveTerminalUntilRef.current = Date.now() + liveTerminalRevealMs;
-      host.classList.add("terminal-live-output");
-      if (liveTerminalTimerRef.current) {
-        window.clearTimeout(liveTerminalTimerRef.current);
-      }
-
-      liveTerminalTimerRef.current = window.setTimeout(() => {
-        liveTerminalTimerRef.current = null;
-        host.classList.remove("terminal-live-output");
-      }, liveTerminalRevealMs);
+    function activateTerminalView() {
+      setViewMode("terminal");
     }
 
     function stripPromptPrefix(line: string) {
@@ -289,13 +276,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         window.clearTimeout(outputCursorTimerRef.current);
         outputCursorTimerRef.current = null;
       }
-      if (liveTerminalTimerRef.current) {
-        window.clearTimeout(liveTerminalTimerRef.current);
-        liveTerminalTimerRef.current = null;
-      }
-      liveTerminalUntilRef.current = 0;
       hostRef.current?.classList.remove("terminal-tui-active");
-      hostRef.current?.classList.remove("terminal-live-output");
       setOutputCursorSuppressed(false);
     }
 
@@ -362,9 +343,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     function enqueueTerminalOutput(data: string) {
       if (!data) return;
 
-      if (shouldUseLiveTerminalOutput(data)) {
-        revealLiveTerminalForDynamicOutput();
-      } else {
+      if (!shouldUseLiveTerminalOutput(data)) {
         appendConversationMessage("terminal", data);
       }
       suppressCursorDuringOutput();
@@ -673,6 +652,9 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
 
       const bufferDisposable = terminal.buffer.onBufferChange((buffer) => {
         host.classList.toggle("terminal-tui-active", buffer.type === "alternate");
+        if (buffer.type === "alternate") {
+          activateTerminalView();
+        }
       });
 
       const dataDisposable = terminal.onData((data) => {
@@ -770,8 +752,32 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     }, [commandRequest?.id]);
 
     return (
-      <div className={`terminal-session ${isVisible ? "visible" : ""} ${isActive ? "active" : ""}`}>
-        <div className="terminal-dialog-log" ref={conversationLogRef} aria-label="对话记录">
+      <div className={`terminal-session ${isVisible ? "visible" : ""} ${isActive ? "active" : ""} mode-${viewMode}`}>
+        <div className="terminal-view-switch" role="group" aria-label="显示模式">
+          <button
+            className={viewMode === "dialog" ? "active" : ""}
+            type="button"
+            onClick={() => setViewMode("dialog")}
+          >
+            对话
+          </button>
+          <button
+            className={viewMode === "terminal" ? "active" : ""}
+            type="button"
+            onClick={() => {
+              setViewMode("terminal");
+              window.setTimeout(() => terminalRef.current?.focus(), 0);
+            }}
+          >
+            终端
+          </button>
+        </div>
+        <div
+          className="terminal-dialog-log"
+          ref={conversationLogRef}
+          aria-hidden={viewMode !== "dialog"}
+          aria-label="对话记录"
+        >
           {conversationMessages.map((message) => (
             <div className={`terminal-dialog-row ${message.role}`} key={message.id}>
               <div className="terminal-dialog-bubble">{message.text}</div>
@@ -781,7 +787,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         <div
           className={`terminal-host ${isVisible ? "visible" : ""} ${isActive ? "active" : ""}`}
           ref={hostRef}
-          aria-hidden
+          aria-hidden={viewMode !== "terminal"}
         />
       </div>
     );
