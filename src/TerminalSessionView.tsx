@@ -33,7 +33,9 @@ export interface TerminalSessionHandle {
   stopSession: () => Promise<void>;
   focus: () => void;
   fit: () => void;
-  sendDialogInput: (input: string) => void;
+  interrupt: () => void;
+  sendCommand: (input: string) => void;
+  sendText: (input: string) => void;
 }
 
 interface TerminalSessionViewProps {
@@ -72,7 +74,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     const isStartingRef = useRef(false);
     const isActiveRef = useRef(isActive);
     const isVisibleRef = useRef(isVisible);
-    const pendingCommandRef = useRef<string | null>(null);
+    const pendingRawInputRef = useRef<string | null>(null);
     const lastCommandIdRef = useRef<number | null>(null);
     const isLifecycleStoppingRef = useRef(false);
     const outputQueueRef = useRef<string[]>([]);
@@ -107,6 +109,12 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       }
       hostRef.current?.classList.remove("terminal-tui-active");
       setOutputCursorSuppressed(false);
+    }
+
+    function discardQueuedOutput() {
+      outputQueueRef.current = [];
+      outputWriterActiveRef.current = false;
+      revealCursorForInput();
     }
 
     function setOutputCursorSuppressed(suppressed: boolean) {
@@ -188,29 +196,43 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       }).catch(reportTerminalError);
     }
 
-    function formatDialogInputForTerminal(input: string) {
+    function normalizeInput(input: string) {
+      return input.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    }
+
+    function formatCommandInput(input: string) {
+      const normalizedInput = normalizeInput(input).trimEnd();
+      if (!normalizedInput) return "";
+
+      return `${normalizedInput.replace(/\n/g, "\r")}\r`;
+    }
+
+    function formatTextInput(input: string) {
       const terminal = terminalRef.current;
-      const normalizedInput = input.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+      const normalizedInput = normalizeInput(input);
+      if (!normalizedInput.trim()) return "";
+
       if (!normalizedInput.includes("\n")) {
-        return normalizedInput;
+        return `${normalizedInput}\r`;
       }
 
       if (terminal?.modes.bracketedPasteMode) {
-        return `\x1b[200~${normalizedInput}\x1b[201~`;
+        return `\x1b[200~${normalizedInput}\x1b[201~\r`;
       }
 
-      return normalizedInput.replace(/\n/g, "\r");
+      return `${normalizedInput.replace(/\n/g, "\r")}\r`;
     }
 
-    function sendInputThroughTerminal(input: string) {
-      const terminal = terminalRef.current;
-      const normalizedInput = input.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-      if (terminal) {
-        terminal.paste(`${normalizedInput}\r`);
+    function sendRawOrQueueInput(data: string) {
+      if (!data) return;
+
+      if (sessionIdRef.current) {
+        writeRawTerminalInput(data);
         return;
       }
 
-      writeRawTerminalInput(`${formatDialogInputForTerminal(input)}\r`);
+      pendingRawInputRef.current = `${pendingRawInputRef.current ?? ""}${data}`;
+      void startSession();
     }
 
     function getClipboardImageItem(dataTransfer: DataTransfer | null) {
@@ -250,7 +272,9 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       const sessionId = sessionIdRef.current;
       startingSessionIdRef.current = null;
       sessionIdRef.current = null;
+      pendingRawInputRef.current = null;
       lastResizeRef.current = null;
+      isLifecycleStoppingRef.current = true;
       setSession(null);
       clearOutputQueue();
       if (sessionId) {
@@ -258,13 +282,13 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       }
     }
 
-    async function flushPendingCommand(sessionId: string) {
-      const command = pendingCommandRef.current;
-      if (!command) return;
+    async function flushPendingRawInput(sessionId: string) {
+      const data = pendingRawInputRef.current;
+      if (!data) return;
 
-      pendingCommandRef.current = null;
+      pendingRawInputRef.current = null;
       void sessionId;
-      sendInputThroughTerminal(command);
+      writeRawTerminalInput(data);
     }
 
     function applyWindowsPtyOptions(started: TerminalStarted) {
@@ -383,7 +407,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
           terminal.writeln(`\x1b[38;5;245m${browserPreviewMessage}\x1b[0m`);
         }
         scheduleFitAndResize();
-        await flushPendingCommand(started.sessionId);
+        await flushPendingRawInput(started.sessionId);
       } catch (err) {
         startingSessionIdRef.current = null;
         sessionIdRef.current = null;
@@ -411,15 +435,18 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       fit() {
         scheduleFitAndResize();
       },
-      sendDialogInput(input: string) {
+      interrupt() {
         const sessionId = sessionIdRef.current;
-        if (sessionId) {
-          sendInputThroughTerminal(input);
-          return;
-        }
+        if (!sessionId) return;
 
-        pendingCommandRef.current = input;
-        void startSession();
+        discardQueuedOutput();
+        writeRawTerminalInput("\x03");
+      },
+      sendCommand(input: string) {
+        sendRawOrQueueInput(formatCommandInput(input));
+      },
+      sendText(input: string) {
+        sendRawOrQueueInput(formatTextInput(input));
       },
     }));
 
@@ -554,11 +581,11 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       if (!commandRequest || lastCommandIdRef.current === commandRequest.id) return;
 
       lastCommandIdRef.current = commandRequest.id;
-      pendingCommandRef.current = commandRequest.command;
+      pendingRawInputRef.current = formatCommandInput(commandRequest.command);
 
       const sessionId = sessionIdRef.current;
       if (sessionId) {
-        void flushPendingCommand(sessionId);
+        void flushPendingRawInput(sessionId);
       } else {
         void startSession();
       }

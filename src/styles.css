@@ -989,8 +989,9 @@ textarea {
 .terminal-composer {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 42px;
+  grid-template-rows: auto auto;
   align-items: end;
-  gap: 10px;
+  gap: 8px 10px;
   min-width: 0;
   padding: 0 18px 16px;
   background:
@@ -1001,7 +1002,105 @@ textarea {
     );
 }
 
+.terminal-composer-toolbar {
+  display: flex;
+  grid-column: 1 / -1;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.terminal-composer-mode,
+.terminal-composer-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.terminal-composer-mode {
+  flex: 0 0 auto;
+  min-height: 30px;
+  padding: 2px;
+  background: color-mix(in srgb, var(--terminal-fg, #d8e1e8) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--terminal-border, #24313a) 68%, transparent);
+  border-radius: 8px;
+}
+
+.terminal-composer-controls {
+  justify-content: flex-end;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--terminal-fg, #d8e1e8) 22%, transparent) transparent;
+}
+
+.terminal-composer-controls::-webkit-scrollbar {
+  height: 3px;
+}
+
+.terminal-composer-controls::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--terminal-fg, #d8e1e8) 22%, transparent);
+  border-radius: 999px;
+}
+
+.terminal-composer-controls::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.terminal-composer-mode-button,
+.terminal-composer-control {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 26px;
+  flex: 0 0 auto;
+  color: var(--terminal-muted, #93a2ae);
+  background: transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 660;
+  line-height: 1;
+  white-space: nowrap;
+  transition:
+    background 140ms ease,
+    color 140ms ease,
+    opacity 140ms ease;
+}
+
+.terminal-composer-mode-button {
+  padding: 0 8px;
+}
+
+.terminal-composer-control {
+  padding: 0 9px;
+  color: var(--terminal-fg, #d8e1e8);
+  background: color-mix(in srgb, var(--terminal-fg, #d8e1e8) 9%, transparent);
+  border: 1px solid color-mix(in srgb, var(--terminal-border, #24313a) 58%, transparent);
+}
+
+.terminal-composer-mode-button:hover,
+.terminal-composer-mode-button.active,
+.terminal-composer-control:hover {
+  color: var(--terminal-fg, #d8e1e8);
+  background: color-mix(in srgb, var(--terminal-fg, #d8e1e8) 14%, transparent);
+}
+
+.terminal-composer-mode-button.active {
+  color: var(--terminal-accent, #8ab4ff);
+}
+
+.terminal-composer-control:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
 .terminal-composer-input {
+  grid-column: 1;
+  grid-row: 2;
   width: 100%;
   min-height: 58px;
   max-height: 150px;
@@ -1034,6 +1133,8 @@ textarea {
 
 .terminal-composer-send {
   display: inline-flex;
+  grid-column: 2;
+  grid-row: 2;
   align-items: center;
   justify-content: center;
   width: 42px;
@@ -1579,8 +1680,23 @@ textarea {
 
   .terminal-composer {
     grid-template-columns: minmax(0, 1fr) 34px;
-    gap: 8px;
+    gap: 5px 8px;
     padding: 0 12px 8px;
+  }
+
+  .terminal-composer-toolbar {
+    gap: 6px;
+  }
+
+  .terminal-composer-mode {
+    min-height: 26px;
+  }
+
+  .terminal-composer-mode-button,
+  .terminal-composer-control {
+    min-height: 22px;
+    padding: 0 7px;
+    font-size: 10px;
   }
 
   .terminal-composer-input {
@@ -1629,7 +1745,28 @@ textarea {
   }
 
   .terminal-composer {
+    grid-template-columns: minmax(0, 1fr) 32px;
     padding: 0 10px 6px;
+  }
+
+  .terminal-composer-toolbar {
+    align-items: stretch;
+  }
+
+  .terminal-composer-mode {
+    min-height: 24px;
+  }
+
+  .terminal-composer-mode-button,
+  .terminal-composer-control {
+    min-width: 26px;
+    min-height: 22px;
+    padding: 0 6px;
+  }
+
+  .terminal-composer-mode-button span,
+  .terminal-composer-control span {
+    display: none;
   }
 
   .terminal-composer-input {

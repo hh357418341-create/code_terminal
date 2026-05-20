@@ -1,4 +1,15 @@
-import { PanelTop, Plus, RotateCcw, SendHorizontal, Square, SquareStack, X } from "lucide-react";
+import {
+  Ban,
+  Keyboard,
+  PanelTop,
+  Plus,
+  RotateCcw,
+  SendHorizontal,
+  Square,
+  SquareStack,
+  Terminal,
+  X,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import {
@@ -38,7 +49,9 @@ interface TerminalTabsState {
 }
 
 type TerminalDisplayMode = "tabs" | "tiles";
+type ComposerMode = "command" | "text";
 type TerminalDockZone = "top" | "right" | "bottom" | "left" | "center";
+type TerminalFocusTarget = "composer" | "terminal" | "none";
 type ResizeAxis = "column" | "row";
 
 interface ResizeDragState {
@@ -388,6 +401,7 @@ export function TerminalPane({
     request: TerminalCommandRequest;
   } | null>(null);
   const [composerInputValue, setComposerInputValue] = useState("");
+  const [composerMode, setComposerMode] = useState<ComposerMode>("command");
   const activeProjectBinding = useMemo(
     () => ({
       id: activeProjectId || null,
@@ -422,22 +436,48 @@ export function TerminalPane({
     window.setTimeout(() => composerInputRef.current?.focus(), 0);
   }
 
+  function focusActiveTerminal() {
+    const activeTerminal = terminalHandlesRef.current[terminalTabs.activeTabId];
+    window.setTimeout(() => activeTerminal?.focus(), 0);
+  }
+
   function submitComposerInput() {
-    const value = composerInputValue.trimEnd();
+    const value = composerMode === "command" ? composerInputValue.trimEnd() : composerInputValue;
     if (!value) return;
 
     const activeTerminal = terminalHandlesRef.current[terminalTabs.activeTabId];
     if (!activeTerminal) return;
 
-    activeTerminal.sendDialogInput(value);
+    if (composerMode === "command") {
+      activeTerminal.sendCommand(value);
+    } else {
+      activeTerminal.sendText(value);
+    }
     setComposerInputValue("");
-    focusComposer();
+    focusActiveTerminal();
   }
 
   function handleComposerInputKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
+    if (event.defaultPrevented) return;
+    if (event.nativeEvent.isComposing) return;
+
     if (event.key === "Escape") {
       event.preventDefault();
-      setComposerInputValue("");
+      if (composerInputValue) {
+        setComposerInputValue("");
+      } else {
+        focusActiveTerminal();
+      }
+      return;
+    }
+
+    if (event.key.toLowerCase() === "c" && event.ctrlKey && !event.shiftKey && !event.altKey) {
+      const target = event.currentTarget;
+      const hasSelection = target.selectionStart !== target.selectionEnd;
+      if (!hasSelection) {
+        event.preventDefault();
+        terminalHandlesRef.current[terminalTabs.activeTabId]?.interrupt();
+      }
       return;
     }
 
@@ -445,6 +485,11 @@ export function TerminalPane({
       event.preventDefault();
       submitComposerInput();
     }
+  }
+
+  function interruptActiveTerminal() {
+    terminalHandlesRef.current[terminalTabs.activeTabId]?.interrupt();
+    focusActiveTerminal();
   }
 
   function fitVisibleTerminals() {
@@ -720,7 +765,7 @@ export function TerminalPane({
       applyDockTarget(drag.tabId, drag.target);
       return;
     }
-    focusTerminal(drag.tabId);
+    focusTerminal(drag.tabId, "terminal");
   }
 
   const updateRuntime = useCallback((tabId: string, runtime: TerminalSessionRuntime) => {
@@ -788,7 +833,6 @@ export function TerminalPane({
       inline: "nearest",
       behavior: "smooth",
     });
-    focusComposer();
   }, [terminalTabs.activeTabId, terminalTabs.tabs.length]);
 
   useEffect(() => {
@@ -815,24 +859,29 @@ export function TerminalPane({
   }
 
   function closeTerminalTab(tabId: string) {
-    if (terminalTabs.tabs.length <= 1) return;
-
     const closingIndex = terminalTabs.tabs.findIndex((tab) => tab.id === tabId);
     if (closingIndex < 0) return;
 
-    const isClosingActiveTab = terminalTabs.activeTabId === tabId;
-    const tabs = terminalTabs.tabs.filter((tab) => tab.id !== tabId);
-    const fallbackTab = tabs[Math.max(0, closingIndex - 1)] ?? tabs[0];
-    const activeTabId = isClosingActiveTab ? fallbackTab.id : terminalTabs.activeTabId;
-
     void terminalHandlesRef.current[tabId]?.stopSession();
-
     setTabRuntime((current) => {
       const next = { ...current };
       delete next[tabId];
       return next;
     });
     setRoutedCommand((current) => (current?.tabId === tabId ? null : current));
+
+    if (terminalTabs.tabs.length <= 1) {
+      if (terminalTabs.activeTabId === tabId) {
+        focusComposer();
+      }
+      return;
+    }
+
+    const isClosingActiveTab = terminalTabs.activeTabId === tabId;
+    const tabs = terminalTabs.tabs.filter((tab) => tab.id !== tabId);
+    const fallbackTab = tabs[Math.max(0, closingIndex - 1)] ?? tabs[0];
+    const activeTabId = isClosingActiveTab ? fallbackTab.id : terminalTabs.activeTabId;
+
     setTerminalTabs({ tabs, activeTabId });
     if (isClosingActiveTab && fallbackTab.projectId && fallbackTab.projectId !== activeProjectId) {
       void onProjectFocus?.(fallbackTab.projectId);
@@ -849,7 +898,7 @@ export function TerminalPane({
     void terminalHandlesRef.current[terminalTabs.activeTabId]?.stopSession();
   }
 
-  function focusTerminal(tabId: string) {
+  function focusTerminal(tabId: string, target: TerminalFocusTarget = "terminal") {
     const tab = terminalTabs.tabs.find((item) => item.id === tabId);
     setTerminalTabs((current) => ({
       ...current,
@@ -858,7 +907,15 @@ export function TerminalPane({
     if (tab?.projectId && tab.projectId !== activeProjectId) {
       onProjectFocus?.(tab.projectId);
     }
-    focusComposer();
+
+    if (target === "composer") {
+      focusComposer();
+      return;
+    }
+
+    if (target === "terminal") {
+      window.setTimeout(() => terminalHandlesRef.current[tabId]?.focus(), 0);
+    }
   }
 
   return (
@@ -902,18 +959,16 @@ export function TerminalPane({
                     <span className={`terminal-tab-dot ${status}`} />
                     <span>{tab.title}</span>
                   </button>
-                  {terminalTabs.tabs.length > 1 && (
-                    <button
-                      className="terminal-tab-close"
-                      title="关闭终端"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        closeTerminalTab(tab.id);
-                      }}
-                    >
-                      <X size={12} />
-                    </button>
-                  )}
+                  <button
+                    className="terminal-tab-close"
+                    title="关闭终端"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      closeTerminalTab(tab.id);
+                    }}
+                  >
+                    <X size={12} />
+                  </button>
                 </div>
               );
             })}
@@ -942,6 +997,15 @@ export function TerminalPane({
               <span>多瓦片</span>
             </button>
           </div>
+          <button
+            className="terminal-action"
+            title="中止当前终端"
+            disabled={!activeRuntime?.session}
+            onClick={interruptActiveTerminal}
+          >
+            <Ban size={14} />
+            中止
+          </button>
           <button
             className="terminal-action"
             title="重启当前终端"
@@ -1011,19 +1075,17 @@ export function TerminalPane({
                 <span className="terminal-cell-path" title={cwd || "未绑定项目目录"}>
                   {formatTerminalPath(cwd)}
                 </span>
-                {terminalTabs.tabs.length > 1 && (
-                  <button
-                    className="terminal-cell-close"
-                    title="关闭此终端"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      closeTerminalTab(tab.id);
-                    }}
-                    onPointerDown={(event) => event.stopPropagation()}
-                  >
-                    <X size={12} />
-                  </button>
-                )}
+                <button
+                  className="terminal-cell-close"
+                  title="关闭此终端"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    closeTerminalTab(tab.id);
+                  }}
+                  onPointerDown={(event) => event.stopPropagation()}
+                >
+                  <X size={12} />
+                </button>
                 {shouldShowDockCue && tabDockTarget && (
                   <span className="terminal-dock-hint">{dockZoneLabels[tabDockTarget.zone]}</span>
                 )}
@@ -1094,21 +1156,84 @@ export function TerminalPane({
       </div>
 
       <form
-        className="terminal-composer"
+        className={`terminal-composer ${composerMode}`}
         aria-label="对话输入"
         onSubmit={(event) => {
           event.preventDefault();
           submitComposerInput();
         }}
       >
+        <div className="terminal-composer-toolbar">
+          <div className="terminal-composer-mode" aria-label="输入模式">
+            <button
+              className={`terminal-composer-mode-button ${composerMode === "command" ? "active" : ""}`}
+              title="命令模式：Enter 直接发送到当前终端"
+              type="button"
+              onClick={() => setComposerMode("command")}
+            >
+              <Terminal size={13} />
+              <span>命令</span>
+            </button>
+            <button
+              className={`terminal-composer-mode-button ${composerMode === "text" ? "active" : ""}`}
+              title="文本模式：Shift+Enter 换行，Enter 发送给 TUI"
+              type="button"
+              onClick={() => setComposerMode("text")}
+            >
+              <Keyboard size={13} />
+              <span>文本</span>
+            </button>
+          </div>
+          <div className="terminal-composer-controls">
+            <button
+              className="terminal-composer-control"
+              disabled={!activeRuntime?.session}
+              title="中止当前终端"
+              type="button"
+              onClick={interruptActiveTerminal}
+            >
+              <Ban size={14} />
+              <span>中止</span>
+            </button>
+            <button
+              className="terminal-composer-control"
+              title="聚焦终端"
+              type="button"
+              onClick={focusActiveTerminal}
+            >
+              <Terminal size={14} />
+              <span>终端</span>
+            </button>
+            <button
+              className="terminal-composer-control"
+              disabled={!activeRuntime?.session}
+              title="停止当前终端"
+              type="button"
+              onClick={stopActiveTerminal}
+            >
+              <Square size={13} />
+              <span>停止</span>
+            </button>
+            <button
+              className="terminal-composer-control"
+              title="关闭当前会话"
+              type="button"
+              onClick={() => closeTerminalTab(terminalTabs.activeTabId)}
+            >
+              <X size={14} />
+              <span>关闭</span>
+            </button>
+          </div>
+        </div>
         <textarea
           ref={composerInputRef}
           className="terminal-composer-input"
           aria-label="输入内容"
-          placeholder="输入给当前会话"
+          placeholder={composerMode === "command" ? "输入命令" : "输入给 TUI"}
           rows={2}
           value={composerInputValue}
           onChange={(event) => setComposerInputValue(event.target.value)}
+          onKeyDownCapture={handleComposerInputKeyDown}
           onKeyDown={handleComposerInputKeyDown}
         />
         <button
