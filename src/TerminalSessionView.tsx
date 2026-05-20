@@ -55,6 +55,7 @@ export interface TerminalSessionHandle {
   focus: () => void;
   fit: () => void;
   interrupt: () => void;
+  sendRawInput: (input: string) => void;
   sendComposerInput: (input: string) => void;
 }
 
@@ -1060,6 +1061,9 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
 
         discardQueuedOutput();
         writeRawTerminalInput("\x03");
+      },
+      sendRawInput(input: string) {
+        sendRawOrQueueInput(input);
       },
       sendComposerInput(input: string) {
         appendConversationMessage("user", input);

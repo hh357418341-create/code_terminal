@@ -1015,12 +1015,13 @@ textarea {
   box-shadow:
     inset 0 1px 0 color-mix(in srgb, #ffffff 5%, transparent),
     0 14px 30px color-mix(in srgb, var(--terminal-bg, #070b10) 34%, transparent);
-  font-family:
-    Inter, "Segoe UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC",
-    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-  font-size: 14px;
+  font-family: var(
+    --terminal-font-family,
+    "Cascadia Mono", "Cascadia Code", "JetBrains Mono", Consolas, "SFMono-Regular", monospace
+  );
+  font-size: var(--terminal-font-size, 14px);
   font-weight: 500;
-  line-height: 1.62;
+  line-height: var(--terminal-dialog-line-height, 20px);
   outline: none;
 }
 
@@ -1603,10 +1604,13 @@ textarea {
   overflow-wrap: anywhere;
   border-radius: 8px;
   box-shadow: 0 8px 20px color-mix(in srgb, var(--terminal-bg, #070b10) 28%, transparent);
-  font-family: inherit;
-  font-size: 14px;
+  font-family: var(
+    --terminal-font-family,
+    "Cascadia Mono", "Cascadia Code", "JetBrains Mono", Consolas, "SFMono-Regular", monospace
+  );
+  font-size: var(--terminal-font-size, 14px);
   font-weight: 500;
-  line-height: 1.72;
+  line-height: var(--terminal-dialog-line-height, 20px);
   white-space: pre-wrap;
 }
 
@@ -1627,9 +1631,6 @@ textarea {
   background: color-mix(in srgb, var(--terminal-fg, #d8e1e8) 9%, var(--terminal-panel, #0c1118));
   border: 1px solid color-mix(in srgb, var(--terminal-border, #1a2433) 66%, transparent);
   border-bottom-left-radius: 3px;
-  font-family:
-    Inter, "Segoe UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC",
-    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
 .terminal-dialog-row.tui .terminal-dialog-bubble {
@@ -1640,12 +1641,9 @@ textarea {
       180deg,
       color-mix(in srgb, var(--terminal-fg, #d8e1e8) 10%, var(--terminal-panel, #0c1118)),
       color-mix(in srgb, var(--terminal-fg, #d8e1e8) 6%, var(--terminal-bg, #070b10))
-    );
+  );
   border-color: color-mix(in srgb, var(--terminal-accent, #8ab4ff) 24%, var(--terminal-border, #1a2433));
-  font-family: "Cascadia Mono", "Cascadia Code", "JetBrains Mono", Consolas, "SFMono-Regular", monospace;
-  font-size: 12.5px;
   font-weight: 500;
-  line-height: 1.68;
 }
 
 .terminal-host {
@@ -1874,7 +1872,6 @@ textarea {
     min-height: 38px;
     max-height: 96px;
     padding: 8px 9px;
-    font-size: 13px;
     resize: none;
   }
 
@@ -1961,8 +1958,6 @@ textarea {
     min-height: 42px;
     max-height: 94px;
     padding: 9px 11px;
-    font-size: 13px;
-    line-height: 1.48;
   }
 
   .terminal-composer-send {
@@ -2033,8 +2028,6 @@ textarea {
     min-height: 36px;
     max-height: 70px;
     padding: 7px 9px;
-    font-size: 12.5px;
-    line-height: 1.4;
   }
 
   .terminal-composer-send {

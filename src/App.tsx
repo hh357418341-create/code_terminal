@@ -187,6 +187,13 @@ export function App() {
       "--app-soft": chrome.sidebarSoft,
       "--sidebar-width": `${sidebarWidth}px`,
       "--sidebar-background-width": `${sidebarWidth}px`,
+      "--terminal-font-family":
+        '"Cascadia Mono", "Cascadia Code", "JetBrains Mono", Consolas, "SFMono-Regular", monospace',
+      "--terminal-font-size": `${terminalAppearance.fontSize}px`,
+      "--terminal-line-height": String(terminalAppearance.lineHeight),
+      "--terminal-dialog-line-height": `${Math.round(
+        terminalAppearance.fontSize * terminalAppearance.lineHeight + 2,
+      )}px`,
     } as CSSProperties;
   }, [sidebarLayout.collapsed, sidebarLayout.width, terminalAppearance]);
 

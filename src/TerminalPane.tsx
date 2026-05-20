@@ -57,6 +57,16 @@ type TerminalDisplayMode = "tabs" | "tiles";
 type TerminalDockZone = "top" | "right" | "bottom" | "left" | "center";
 type TerminalFocusTarget = "composer" | "terminal" | "none";
 type ResizeAxis = "column" | "row";
+type ComposerTerminalNavigationKey =
+  | "ArrowUp"
+  | "ArrowDown"
+  | "ArrowLeft"
+  | "ArrowRight"
+  | "PageUp"
+  | "PageDown"
+  | "Home"
+  | "End"
+  | "Enter";
 
 interface ResizeDragState {
   axis: ResizeAxis;
@@ -82,6 +92,18 @@ interface TerminalDockTarget {
 }
 
 type TerminalRuntimeStatus = "starting" | "running" | "stopped";
+
+const composerTerminalNavigationInput: Record<ComposerTerminalNavigationKey, string> = {
+  ArrowUp: "\x1b[A",
+  ArrowDown: "\x1b[B",
+  ArrowRight: "\x1b[C",
+  ArrowLeft: "\x1b[D",
+  PageUp: "\x1b[5~",
+  PageDown: "\x1b[6~",
+  Home: "\x1b[H",
+  End: "\x1b[F",
+  Enter: "\r",
+};
 
 type TerminalTileArrangement =
   | { kind: "auto" }
@@ -457,6 +479,17 @@ export function TerminalPane({
     focusActiveTerminal();
   }
 
+  function sendComposerNavigationKeyToTerminal(key: string) {
+    if (composerInputValue.trim()) return false;
+    if (!(key in composerTerminalNavigationInput)) return false;
+
+    const activeTerminal = terminalHandlesRef.current[terminalTabs.activeTabId];
+    if (!activeTerminal) return false;
+
+    activeTerminal.sendRawInput(composerTerminalNavigationInput[key as ComposerTerminalNavigationKey]);
+    return true;
+  }
+
   function handleComposerInputKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
     if (event.defaultPrevented) return;
     if (event.nativeEvent.isComposing) return;
@@ -478,6 +511,17 @@ export function TerminalPane({
         event.preventDefault();
         terminalHandlesRef.current[terminalTabs.activeTabId]?.interrupt();
       }
+      return;
+    }
+
+    if (
+      !event.shiftKey &&
+      !event.ctrlKey &&
+      !event.altKey &&
+      !event.metaKey &&
+      sendComposerNavigationKeyToTerminal(event.key)
+    ) {
+      event.preventDefault();
       return;
     }
 
