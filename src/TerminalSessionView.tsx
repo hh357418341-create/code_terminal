@@ -23,7 +23,7 @@ const conversationOutputMergeWindowMs = 1200;
 const maxConversationMessages = 160;
 const liveTuiSnapshotDebounceMs = 80;
 const maxLiveTuiSnapshotChars = 6000;
-const bracketedPasteSubmitDelayMs = 80;
+const bracketedPasteSubmitDelayMs = 180;
 const codexStatusWords = ["Working", "Thinking", "Reading", "Editing", "Running"];
 const terminalViewModeStorageKey = "code-terminal-view-mode";
 
@@ -830,6 +830,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       setViewMode("dialog");
       rememberTerminalViewMode("dialog");
       window.setTimeout(() => {
+        scheduleFitAndResize();
         if (hasLiveTuiSnapshotContext()) {
           captureLiveTuiSnapshot();
         }
@@ -1506,22 +1507,24 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
             </span>
           </div>
         ) : null}
-        <div
-          className="terminal-dialog-log"
-          ref={conversationLogRef}
-          aria-hidden={viewMode !== "dialog"}
-          aria-label="对话记录"
-        >
-          {conversationMessages.map((message) => (
-            <div className={`terminal-dialog-row ${message.role} ${message.kind ?? "normal"}`} key={message.id}>
-              <div className="terminal-dialog-bubble">{renderConversationText(message)}</div>
-            </div>
-          ))}
+        <div className="terminal-dialog-split" aria-hidden={viewMode !== "dialog"}>
+          <div
+            className="terminal-dialog-log"
+            ref={conversationLogRef}
+            aria-label="对话记录"
+          >
+            {conversationMessages
+              .filter((message) => viewMode !== "dialog" || message.role === "user")
+              .map((message) => (
+                <div className={`terminal-dialog-row ${message.role} ${message.kind ?? "normal"}`} key={message.id}>
+                  <div className="terminal-dialog-bubble">{renderConversationText(message)}</div>
+                </div>
+              ))}
+          </div>
         </div>
         <div
           className={`terminal-host ${isVisible ? "visible" : ""} ${isActive ? "active" : ""}`}
           ref={hostRef}
-          aria-hidden={viewMode !== "terminal"}
         />
       </div>
     );

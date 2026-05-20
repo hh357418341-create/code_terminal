@@ -1456,12 +1456,15 @@ textarea {
 
 .terminal-dialog-log {
   position: absolute;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
   z-index: 2;
   display: flex;
   flex-direction: column;
   gap: 16px;
-  min-width: 0;
+  width: min(35%, 420px);
+  min-width: 280px;
   min-height: 0;
   padding: 50px 22px 20px;
   overflow-x: hidden;
@@ -1474,6 +1477,11 @@ textarea {
     );
   scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--terminal-fg, #d8e1e8) 18%, transparent) transparent;
+}
+
+.terminal-session.mode-dialog .terminal-dialog-log {
+  border-left: 1px solid color-mix(in srgb, var(--terminal-border, #1a2433) 70%, transparent);
+  box-shadow: -18px 0 26px color-mix(in srgb, var(--terminal-bg, #070b10) 22%, transparent);
 }
 
 .terminal-session.mode-terminal .terminal-dialog-log {
@@ -1673,6 +1681,15 @@ textarea {
   visibility: hidden;
 }
 
+.terminal-session.mode-dialog .terminal-host {
+  right: min(35%, 420px);
+  width: auto;
+  z-index: 3;
+  opacity: 1;
+  pointer-events: auto;
+  visibility: visible;
+}
+
 .terminal-session.mode-terminal .terminal-host {
   z-index: 3;
   opacity: 1;
@@ -1854,7 +1871,14 @@ textarea {
   }
 
   .terminal-dialog-log {
+    width: min(38%, 360px);
+    min-width: 220px;
     padding: 38px 8px 8px;
+  }
+
+  .terminal-session.mode-dialog .terminal-host {
+    right: min(38%, 360px);
+    width: auto;
   }
 
   .terminal-session.has-context .terminal-dialog-log {
@@ -1952,7 +1976,14 @@ textarea {
   }
 
   .terminal-dialog-log {
+    width: min(38%, 380px);
+    min-width: 240px;
     padding: 38px 10px 8px;
+  }
+
+  .terminal-session.mode-dialog .terminal-host {
+    right: min(38%, 380px);
+    width: auto;
   }
 
   .terminal-session.has-context .terminal-dialog-log {
@@ -2009,11 +2040,26 @@ textarea {
   }
 
   .terminal-dialog-log {
+    position: absolute;
+    top: auto;
+    left: 0;
+    right: 0;
     padding: 34px 8px 6px;
+    width: auto;
+    min-width: 0;
+    max-height: 36%;
+    border-top: 1px solid color-mix(in srgb, var(--terminal-border, #1a2433) 70%, transparent);
   }
 
   .terminal-session.has-context .terminal-dialog-log {
     padding-top: 38px;
+  }
+
+  .terminal-session.mode-dialog .terminal-host {
+    right: 0;
+    bottom: 36%;
+    width: auto;
+    height: auto;
   }
 
   .terminal-dialog-context {
