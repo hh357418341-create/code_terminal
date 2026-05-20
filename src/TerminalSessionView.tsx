@@ -191,13 +191,15 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     function formatDialogInputForTerminal(input: string) {
       const terminal = terminalRef.current;
       const normalizedInput = input.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-      const pasteInput = normalizedInput.replace(/\n/g, "\r");
-
-      if (terminal?.modes.bracketedPasteMode) {
-        return `\x1b[200~${pasteInput}\x1b[201~`;
+      if (!normalizedInput.includes("\n")) {
+        return normalizedInput;
       }
 
-      return pasteInput;
+      if (terminal?.modes.bracketedPasteMode) {
+        return `\x1b[200~${normalizedInput}\x1b[201~`;
+      }
+
+      return normalizedInput.replace(/\n/g, "\r");
     }
 
     function getClipboardImageItem(dataTransfer: DataTransfer | null) {
@@ -406,7 +408,14 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       },
       sendDialogInput(input: string) {
         const formattedInput = formatDialogInputForTerminal(input);
-        writeRawTerminalInput(`${formattedInput}\r`);
+        const sessionId = sessionIdRef.current;
+        if (sessionId) {
+          writeRawTerminalInput(`${formattedInput}\r`);
+          return;
+        }
+
+        pendingCommandRef.current = input;
+        void startSession();
       },
     }));
 

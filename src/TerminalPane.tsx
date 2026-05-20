@@ -426,7 +426,10 @@ export function TerminalPane({
     const value = composerInputValue.trimEnd();
     if (!value) return;
 
-    terminalHandlesRef.current[terminalTabs.activeTabId]?.sendDialogInput(value);
+    const activeTerminal = terminalHandlesRef.current[terminalTabs.activeTabId];
+    if (!activeTerminal) return;
+
+    activeTerminal.sendDialogInput(value);
     setComposerInputValue("");
     focusComposer();
   }
