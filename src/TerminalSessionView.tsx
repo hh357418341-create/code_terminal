@@ -19,6 +19,18 @@ const resizeDebounceMs = 40;
 const resizeSettleDelays = [80, 180, 360];
 const browserPreviewMessage =
   "Browser preview mode: native terminal sessions run only inside the Tauri app.";
+const conversationOutputMergeWindowMs = 1200;
+const maxConversationMessages = 160;
+
+type ConversationRole = "user" | "terminal";
+
+interface ConversationMessage {
+  id: string;
+  role: ConversationRole;
+  text: string;
+  createdAt: number;
+  updatedAt: number;
+}
 
 export interface TerminalSessionRuntime {
   session: TerminalStarted | null;
@@ -63,6 +75,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     const terminalRef = useRef<XTerm | null>(null);
     const fitRef = useRef<FitAddon | null>(null);
     const sessionIdRef = useRef<string | null>(null);
+    const conversationLogRef = useRef<HTMLDivElement | null>(null);
     const startingSessionIdRef = useRef<string | null>(null);
     const resizeTimerRef = useRef<number | null>(null);
     const resizeFrameRef = useRef<number | null>(null);
@@ -78,8 +91,11 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     const outputCursorTimerRef = useRef<number | null>(null);
     const outputCursorSuppressedRef = useRef(false);
     const lastResizeRef = useRef<{ cols: number; rows: number } | null>(null);
+    const recentUserInputsRef = useRef<string[]>([]);
+    const pendingEchoInputsRef = useRef<string[]>([]);
     const [session, setSession] = useState<TerminalStarted | null>(null);
     const [isStarting, setIsStarting] = useState(false);
+    const [conversationMessages, setConversationMessages] = useState<ConversationMessage[]>([]);
 
     function shouldSuppressTerminalError(err: unknown) {
       const message = String(err);
@@ -94,6 +110,129 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     function reportTerminalError(err: unknown) {
       if (shouldSuppressTerminalError(err)) return;
       onError(String(err));
+    }
+
+    function createConversationId() {
+      return typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random()}`;
+    }
+
+    function stripAnsiSequences(value: string) {
+      const text = value
+        .replace(/\x1b\][\s\S]*?(?:\x07|\x1b\\)/g, "")
+        .replace(/\x1b[P^_][\s\S]*?\x1b\\/g, "")
+        .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
+        .replace(/\x1b[@-Z\\-_]/g, "")
+        .replace(/\r\n/g, "\n")
+        .replace(/\r/g, "\n");
+
+      const chars: string[] = [];
+      for (const character of text) {
+        if (character === "\b") {
+          chars.pop();
+        } else {
+          chars.push(character);
+        }
+      }
+
+      return chars
+        .join("")
+        .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "")
+        .replace(/[ \t]+\n/g, "\n")
+        .replace(/\n{4,}/g, "\n\n\n");
+    }
+
+    function stripPromptPrefix(line: string) {
+      const powerShellPrompt = line.match(/^PS\s.+?>\s*(.*)$/);
+      if (powerShellPrompt) return powerShellPrompt[1].trim();
+
+      const shellPrompt = line.match(/^[\w.-]+@[\w.-]+:.*[#$]\s*(.*)$/);
+      if (shellPrompt) return shellPrompt[1].trim();
+
+      const simpleShellPrompt = line.match(/^[#$]\s+(.*)$/);
+      if (simpleShellPrompt) return simpleShellPrompt[1].trim();
+
+      return line.trim();
+    }
+
+    function formatTerminalConversationText(value: string) {
+      const recentUserInputs = new Set(recentUserInputsRef.current.map((input) => input.trim()).filter(Boolean));
+      const lines = stripAnsiSequences(value)
+        .split("\n")
+        .map(stripPromptPrefix)
+        .filter((line) => {
+          const trimmedLine = line.trim();
+          return trimmedLine && !recentUserInputs.has(trimmedLine) && !consumePendingEchoLine(trimmedLine);
+        });
+
+      return lines.join("\n").replace(/\n{4,}/g, "\n\n\n").trim();
+    }
+
+    function consumePendingEchoLine(line: string) {
+      const normalizedLine = line.trim();
+      if (!normalizedLine) return false;
+
+      for (const [index, pendingInput] of pendingEchoInputsRef.current.entries()) {
+        if (pendingInput === normalizedLine) {
+          pendingEchoInputsRef.current.splice(index, 1);
+          return true;
+        }
+
+        if (pendingInput.startsWith(`${normalizedLine} `)) {
+          pendingEchoInputsRef.current[index] = pendingInput.slice(normalizedLine.length).trimStart();
+          return true;
+        }
+      }
+
+      return false;
+    }
+
+    function rememberUserConversationInput(text: string) {
+      const normalizedText = normalizeInput(text).trim();
+      if (!normalizedText) return;
+
+      recentUserInputsRef.current = [...recentUserInputsRef.current, normalizedText].slice(-12);
+      pendingEchoInputsRef.current = [...pendingEchoInputsRef.current, normalizedText].slice(-6);
+    }
+
+    function appendConversationMessage(role: ConversationRole, text: string) {
+      const normalizedText = role === "terminal" ? formatTerminalConversationText(text) : normalizeInput(text).trimEnd();
+      if (!normalizedText.trim()) return;
+
+      if (role === "user") {
+        rememberUserConversationInput(normalizedText);
+      }
+
+      const now = Date.now();
+      setConversationMessages((current) => {
+        const last = current[current.length - 1];
+        if (
+          role === "terminal" &&
+          last?.role === "terminal" &&
+          now - last.updatedAt <= conversationOutputMergeWindowMs
+        ) {
+          return [
+            ...current.slice(0, -1),
+            {
+              ...last,
+              text: `${last.text}\n${normalizedText}`.replace(/\n{4,}/g, "\n\n\n"),
+              updatedAt: now,
+            },
+          ].slice(-maxConversationMessages);
+        }
+
+        return [
+          ...current,
+          {
+            id: createConversationId(),
+            role,
+            text: normalizedText,
+            createdAt: now,
+            updatedAt: now,
+          },
+        ].slice(-maxConversationMessages);
+      });
     }
 
     function clearOutputQueue() {
@@ -170,6 +309,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     function enqueueTerminalOutput(data: string) {
       if (!data) return;
 
+      appendConversationMessage("terminal", data);
       suppressCursorDuringOutput();
       for (let index = 0; index < data.length; index += outputChunkSize) {
         outputQueueRef.current.push(data.slice(index, index + outputChunkSize));
@@ -373,6 +513,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         startingSessionIdRef.current = null;
         sessionIdRef.current = started.sessionId;
         setSession(started);
+        appendConversationMessage("terminal", `${started.shell}\n${started.cwd}`);
         terminal.clear();
         terminal.writeln(`\x1b[38;5;113m${started.shell}\x1b[0m  \x1b[38;5;245m${started.cwd}\x1b[0m`);
         if (!isTauriRuntime() && started.shell === "Browser preview") {
@@ -415,9 +556,17 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         writeRawTerminalInput("\x03");
       },
       sendComposerInput(input: string) {
+        appendConversationMessage("user", input);
         sendRawOrQueueInput(formatComposerInput(input));
       },
     }));
+
+    useEffect(() => {
+      const log = conversationLogRef.current;
+      if (!log) return;
+
+      log.scrollTop = log.scrollHeight;
+    }, [conversationMessages]);
 
     useEffect(() => {
       onRuntimeChange(tabId, { session, isStarting });
@@ -442,6 +591,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       const host = hostRef.current;
       if (!host) return;
 
+      setConversationMessages([]);
       const terminal = new XTerm({
         allowProposedApi: false,
         convertEol: false,
@@ -511,6 +661,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         if (event.payload.sessionId !== sessionIdRef.current) return;
         sessionIdRef.current = null;
         setSession(null);
+        appendConversationMessage("terminal", "会话已结束");
       });
 
       startSession();
@@ -551,6 +702,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
 
       lastCommandIdRef.current = commandRequest.id;
       pendingRawInputRef.current = formatCommandInput(commandRequest.command);
+      appendConversationMessage("user", commandRequest.command);
 
       const sessionId = sessionIdRef.current;
       if (sessionId) {
@@ -561,11 +713,20 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     }, [commandRequest?.id]);
 
     return (
-      <div
-        className={`terminal-host ${isVisible ? "visible" : ""} ${isActive ? "active" : ""}`}
-        ref={hostRef}
-        aria-hidden={!isVisible}
-      />
+      <div className={`terminal-session ${isVisible ? "visible" : ""} ${isActive ? "active" : ""}`}>
+        <div className="terminal-dialog-log" ref={conversationLogRef} aria-label="对话记录">
+          {conversationMessages.map((message) => (
+            <div className={`terminal-dialog-row ${message.role}`} key={message.id}>
+              <div className="terminal-dialog-bubble">{message.text}</div>
+            </div>
+          ))}
+        </div>
+        <div
+          className={`terminal-host ${isVisible ? "visible" : ""} ${isActive ? "active" : ""}`}
+          ref={hostRef}
+          aria-hidden
+        />
+      </div>
     );
   },
 );

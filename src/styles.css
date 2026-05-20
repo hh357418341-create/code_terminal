@@ -1435,8 +1435,9 @@ textarea {
   white-space: nowrap;
 }
 
-.terminal-host {
+.terminal-session {
   display: none;
+  position: relative;
   width: 100%;
   height: 100%;
   min-width: 0;
@@ -1445,8 +1446,116 @@ textarea {
   background: transparent;
 }
 
+.terminal-session.visible {
+  display: block;
+}
+
+.terminal-dialog-log {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+  padding: 14px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--terminal-panel, #0c1118) 86%, transparent),
+      color-mix(in srgb, var(--terminal-bg, #070b10) 92%, transparent)
+    );
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--terminal-fg, #d8e1e8) 18%, transparent) transparent;
+}
+
+.terminal-dialog-log::-webkit-scrollbar {
+  width: 8px;
+}
+
+.terminal-dialog-log::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--terminal-fg, #d8e1e8) 18%, transparent);
+  border-radius: 999px;
+}
+
+.terminal-dialog-log::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.terminal-dialog-row {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+}
+
+.terminal-dialog-row.user {
+  justify-content: flex-end;
+}
+
+.terminal-dialog-row.terminal {
+  justify-content: flex-start;
+}
+
+.terminal-dialog-bubble {
+  max-width: min(76%, 860px);
+  min-width: 0;
+  padding: 10px 12px;
+  overflow-wrap: anywhere;
+  border-radius: 8px;
+  box-shadow: 0 8px 20px color-mix(in srgb, var(--terminal-bg, #070b10) 28%, transparent);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 520;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.terminal-dialog-row.user .terminal-dialog-bubble {
+  color: #ffffff;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--terminal-accent, #8ab4ff) 78%, #2f6edb),
+      color-mix(in srgb, var(--terminal-accent, #8ab4ff) 58%, #2552a6)
+    );
+  border: 1px solid color-mix(in srgb, var(--terminal-accent, #8ab4ff) 64%, transparent);
+  border-bottom-right-radius: 3px;
+}
+
+.terminal-dialog-row.terminal .terminal-dialog-bubble {
+  color: var(--terminal-fg, #d8e1e8);
+  background: color-mix(in srgb, var(--terminal-fg, #d8e1e8) 8%, var(--terminal-panel, #0c1118));
+  border: 1px solid color-mix(in srgb, var(--terminal-border, #1a2433) 74%, transparent);
+  border-bottom-left-radius: 3px;
+  font-family: "Cascadia Mono", "Cascadia Code", "JetBrains Mono", Consolas, "SFMono-Regular", monospace;
+}
+
+.terminal-host {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: transparent;
+  opacity: 0.01;
+  pointer-events: none;
+}
+
 .terminal-host.visible {
   display: block;
+}
+
+.terminal-host.terminal-tui-active {
+  z-index: 3;
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .terminal-host .xterm {
