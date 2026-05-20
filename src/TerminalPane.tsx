@@ -13,6 +13,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   CSSProperties,
   ClipboardEvent as ReactClipboardEvent,
+  FormEvent as ReactFormEvent,
   KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
 } from "react";
@@ -65,8 +66,7 @@ type ComposerTerminalNavigationKey =
   | "PageUp"
   | "PageDown"
   | "Home"
-  | "End"
-  | "Enter";
+  | "End";
 
 interface ResizeDragState {
   axis: ResizeAxis;
@@ -102,7 +102,6 @@ const composerTerminalNavigationInput: Record<ComposerTerminalNavigationKey, str
   PageDown: "\x1b[6~",
   Home: "\x1b[H",
   End: "\x1b[F",
-  Enter: "\r",
 };
 
 type TerminalTileArrangement =
@@ -412,6 +411,8 @@ export function TerminalPane({
   const lastRoutedCommandIdRef = useRef<number | null>(null);
   const previousProjectIdRef = useRef(activeProjectId);
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const allowNextComposerLineBreakRef = useRef(false);
+  const suppressNextComposerLineBreakRef = useRef(false);
   const [terminalTabs, setTerminalTabs] = useState<TerminalTabsState>(() =>
     createInitialTabs({ id: activeProjectId, name: activeProjectName, path: activeProjectPath }),
   );
@@ -479,8 +480,8 @@ export function TerminalPane({
     window.setTimeout(() => activeTerminal?.focus(), 0);
   }
 
-  function submitComposerInput() {
-    const value = composerInputValue.trimEnd();
+  function submitComposerInput(inputValue = composerInputValue) {
+    const value = inputValue.trimEnd();
     if (!value) return;
 
     const activeTerminal = terminalHandlesRef.current[terminalTabs.activeTabId];
@@ -489,6 +490,14 @@ export function TerminalPane({
     activeTerminal.sendComposerInput(value);
     setComposerInputValue("");
     focusActiveTerminal();
+  }
+
+  function sendComposerEnterToTerminal() {
+    const activeTerminal = terminalHandlesRef.current[terminalTabs.activeTabId];
+    if (!activeTerminal) return false;
+
+    activeTerminal.sendRawInput("\r");
+    return true;
   }
 
   function sendComposerNavigationKeyToTerminal(key: string) {
@@ -526,6 +535,25 @@ export function TerminalPane({
       return;
     }
 
+    if (event.key === "Enter") {
+      if (event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey) {
+        allowNextComposerLineBreakRef.current = true;
+        return;
+      }
+
+      if (!event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey) {
+        event.preventDefault();
+        event.stopPropagation();
+        suppressNextComposerLineBreakRef.current = true;
+        if (event.currentTarget.value.trim()) {
+          submitComposerInput(event.currentTarget.value);
+        } else {
+          sendComposerEnterToTerminal();
+        }
+        return;
+      }
+    }
+
     if (
       !event.shiftKey &&
       !event.ctrlKey &&
@@ -536,10 +564,29 @@ export function TerminalPane({
       event.preventDefault();
       return;
     }
+  }
 
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault();
-      submitComposerInput();
+  function handleComposerBeforeInput(event: ReactFormEvent<HTMLTextAreaElement>) {
+    const inputEvent = event.nativeEvent as InputEvent;
+    if (inputEvent.inputType !== "insertLineBreak" && inputEvent.inputType !== "insertParagraph") {
+      return;
+    }
+
+    if (allowNextComposerLineBreakRef.current) {
+      allowNextComposerLineBreakRef.current = false;
+      return;
+    }
+
+    event.preventDefault();
+    if (suppressNextComposerLineBreakRef.current) {
+      suppressNextComposerLineBreakRef.current = false;
+      return;
+    }
+
+    if (event.currentTarget.value.trim()) {
+      submitComposerInput(event.currentTarget.value);
+    } else {
+      sendComposerEnterToTerminal();
     }
   }
 
@@ -1258,6 +1305,7 @@ export function TerminalPane({
           rows={2}
           value={composerInputValue}
           onChange={(event) => setComposerInputValue(event.target.value)}
+          onBeforeInput={handleComposerBeforeInput}
           onKeyDownCapture={handleComposerInputKeyDown}
           onKeyDown={handleComposerInputKeyDown}
           onPaste={handleComposerPaste}
