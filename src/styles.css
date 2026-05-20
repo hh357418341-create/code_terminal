@@ -1558,6 +1558,12 @@ textarea {
   pointer-events: auto;
 }
 
+.terminal-host.terminal-live-output {
+  z-index: 3;
+  opacity: 1;
+  pointer-events: auto;
+}
+
 .terminal-host .xterm {
   width: 100%;
   height: 100%;

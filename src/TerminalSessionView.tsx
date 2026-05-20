@@ -15,6 +15,7 @@ import type {
 
 const outputChunkSize = 4096;
 const outputCursorRevealDelayMs = 2400;
+const liveTerminalRevealMs = 4200;
 const resizeDebounceMs = 40;
 const resizeSettleDelays = [80, 180, 360];
 const browserPreviewMessage =
@@ -89,6 +90,8 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     const outputQueueRef = useRef<string[]>([]);
     const outputWriterActiveRef = useRef(false);
     const outputCursorTimerRef = useRef<number | null>(null);
+    const liveTerminalTimerRef = useRef<number | null>(null);
+    const liveTerminalUntilRef = useRef(0);
     const outputCursorSuppressedRef = useRef(false);
     const lastResizeRef = useRef<{ cols: number; rows: number } | null>(null);
     const recentUserInputsRef = useRef<string[]>([]);
@@ -141,6 +144,50 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "")
         .replace(/[ \t]+\n/g, "\n")
         .replace(/\n{4,}/g, "\n\n\n");
+    }
+
+    function hasStandaloneCarriageReturn(value: string) {
+      return /\r(?!\n)/.test(value);
+    }
+
+    function hasDynamicTerminalControl(value: string) {
+      return (
+        hasStandaloneCarriageReturn(value) ||
+        /\x1b\[[0-?]*[ -/]*[ABCDGJKSTfHLsu]/.test(value) ||
+        /\x1b\[\?[0-9;]*(?:h|l)/.test(value) ||
+        /\x1b[78=>]/.test(value)
+      );
+    }
+
+    function looksLikeCodexStatusFrame(value: string) {
+      const text = stripAnsiSequences(value).replace(/\s+/g, " ").trim();
+      if (!text) return false;
+
+      return (
+        /\besc to interrupt\b/i.test(text) ||
+        /\bContext\s+\d+%/i.test(text) ||
+        /^[•●]?\s*(Working|Thinking|Reading|Editing|Running)\b/i.test(text)
+      );
+    }
+
+    function shouldUseLiveTerminalOutput(value: string) {
+      return Date.now() < liveTerminalUntilRef.current || hasDynamicTerminalControl(value) || looksLikeCodexStatusFrame(value);
+    }
+
+    function revealLiveTerminalForDynamicOutput() {
+      const host = hostRef.current;
+      if (!host) return;
+
+      liveTerminalUntilRef.current = Date.now() + liveTerminalRevealMs;
+      host.classList.add("terminal-live-output");
+      if (liveTerminalTimerRef.current) {
+        window.clearTimeout(liveTerminalTimerRef.current);
+      }
+
+      liveTerminalTimerRef.current = window.setTimeout(() => {
+        liveTerminalTimerRef.current = null;
+        host.classList.remove("terminal-live-output");
+      }, liveTerminalRevealMs);
     }
 
     function stripPromptPrefix(line: string) {
@@ -242,7 +289,13 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         window.clearTimeout(outputCursorTimerRef.current);
         outputCursorTimerRef.current = null;
       }
+      if (liveTerminalTimerRef.current) {
+        window.clearTimeout(liveTerminalTimerRef.current);
+        liveTerminalTimerRef.current = null;
+      }
+      liveTerminalUntilRef.current = 0;
       hostRef.current?.classList.remove("terminal-tui-active");
+      hostRef.current?.classList.remove("terminal-live-output");
       setOutputCursorSuppressed(false);
     }
 
@@ -309,7 +362,11 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     function enqueueTerminalOutput(data: string) {
       if (!data) return;
 
-      appendConversationMessage("terminal", data);
+      if (shouldUseLiveTerminalOutput(data)) {
+        revealLiveTerminalForDynamicOutput();
+      } else {
+        appendConversationMessage("terminal", data);
+      }
       suppressCursorDuringOutput();
       for (let index = 0; index < data.length; index += outputChunkSize) {
         outputQueueRef.current.push(data.slice(index, index + outputChunkSize));
