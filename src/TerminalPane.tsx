@@ -10,12 +10,18 @@ import {
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
+import type {
+  CSSProperties,
+  ClipboardEvent as ReactClipboardEvent,
+  KeyboardEvent as ReactKeyboardEvent,
+  PointerEvent as ReactPointerEvent,
+} from "react";
 import {
   TerminalSessionView,
   type TerminalSessionHandle,
   type TerminalSessionRuntime,
 } from "./TerminalSessionView";
+import { formatPastedImagePath, getClipboardImageItem, saveClipboardImage } from "./clipboardImages";
 import type { TerminalAppearanceSettings, TerminalCommandRequest } from "./types";
 
 interface TerminalPaneProps {
@@ -478,6 +484,37 @@ export function TerminalPane({
       event.preventDefault();
       submitComposerInput();
     }
+  }
+
+  function insertComposerText(text: string, target?: HTMLTextAreaElement | null) {
+    if (!text) return;
+
+    const input = target ?? composerInputRef.current;
+    const selectionStart = input?.selectionStart ?? composerInputValue.length;
+    const selectionEnd = input?.selectionEnd ?? selectionStart;
+    const nextValue =
+      composerInputValue.slice(0, selectionStart) + text + composerInputValue.slice(selectionEnd);
+    const nextCursor = selectionStart + text.length;
+
+    setComposerInputValue(nextValue);
+    window.setTimeout(() => {
+      composerInputRef.current?.focus();
+      composerInputRef.current?.setSelectionRange(nextCursor, nextCursor);
+    }, 0);
+  }
+
+  function handleComposerPaste(event: ReactClipboardEvent<HTMLTextAreaElement>) {
+    const imageItem = getClipboardImageItem(event.clipboardData);
+    if (!imageItem) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    const input = event.currentTarget;
+    void saveClipboardImage(imageItem)
+      .then((path) => {
+        if (path) insertComposerText(formatPastedImagePath(path), input);
+      })
+      .catch((error) => onError(String(error)));
   }
 
   function interruptActiveTerminal() {
@@ -1208,6 +1245,7 @@ export function TerminalPane({
           onChange={(event) => setComposerInputValue(event.target.value)}
           onKeyDownCapture={handleComposerInputKeyDown}
           onKeyDown={handleComposerInputKeyDown}
+          onPaste={handleComposerPaste}
         />
         <button
           className="terminal-composer-send"

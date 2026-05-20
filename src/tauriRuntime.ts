@@ -57,7 +57,7 @@ async function previewInvoke<T>(cmd: string, args?: InvokeArgs): Promise<T> {
     case "terminal_stop":
       return undefined as T;
     case "save_pasted_image":
-      return "" as T;
+      return "C:\\Temp\\code-terminal\\pasted-images\\preview-paste.png" as T;
     default:
       return Promise.reject(new Error(`Tauri command "${cmd}" is not available in browser preview.`));
   }

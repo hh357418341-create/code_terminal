@@ -2,6 +2,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import "@xterm/xterm/css/xterm.css";
+import { formatPastedImagePath, getClipboardImageItem, saveClipboardImage } from "./clipboardImages";
 import { invoke, isTauriRuntime, listen } from "./tauriRuntime";
 import { getXtermTheme } from "./terminalThemes";
 import type {
@@ -18,10 +19,6 @@ const resizeDebounceMs = 40;
 const resizeSettleDelays = [80, 180, 360];
 const browserPreviewMessage =
   "Browser preview mode: native terminal sessions run only inside the Tauri app.";
-
-interface SavedPastedImage {
-  path: string;
-}
 
 export interface TerminalSessionRuntime {
   session: TerminalStarted | null;
@@ -232,30 +229,6 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
 
       pendingRawInputRef.current = `${pendingRawInputRef.current ?? ""}${data}`;
       void startSession();
-    }
-
-    function getClipboardImageItem(dataTransfer: DataTransfer | null) {
-      if (!dataTransfer) return null;
-
-      const items = Array.from(dataTransfer.items);
-      return items.find((item) => item.kind === "file" && item.type.startsWith("image/")) ?? null;
-    }
-
-    async function saveClipboardImage(item: DataTransferItem) {
-      const file = item.getAsFile();
-      if (!file) return null;
-
-      const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
-      const path = await invoke<string>("save_pasted_image", {
-        mimeType: file.type || item.type,
-        bytes,
-      });
-
-      return path;
-    }
-
-    function formatPastedImagePath(path: string) {
-      return `"${path.replace(/"/g, '\\"')}"`;
     }
 
     function isPasteShortcut(event: KeyboardEvent) {
