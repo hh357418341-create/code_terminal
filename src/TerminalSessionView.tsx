@@ -133,6 +133,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     const liveTuiOutputQueuedRef = useRef(false);
     const liveTuiSnapshotStartRowRef = useRef<number | null>(null);
     const liveTuiTranscriptRowsRef = useRef<ConversationLine[]>([]);
+    const codexWelcomeMessageIdRef = useRef<string | null>(null);
     const dialogConversationStartedRef = useRef(false);
     const pendingSubmitTimerRef = useRef<number | null>(null);
     const [session, setSession] = useState<TerminalStarted | null>(null);
@@ -572,6 +573,186 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       return compactRows;
     }
 
+    function stripCodexWelcomeBoxLine(line: string) {
+      return line
+        .trim()
+        .replace(/^[│|]\s*/, "")
+        .replace(/\s*[│|]$/, "")
+        .replace(/^>_\s*/, "")
+        .replace(/\s{2,}/g, " ")
+        .trim();
+    }
+
+    function extractCodexWelcomeRows(rows: ConversationLine[]) {
+      const lines = rows.map((row) => stripCodexWelcomeBoxLine(row.text)).filter(Boolean);
+      if (!lines.some((line) => /\bOpenAI Codex\b/i.test(line))) return [];
+
+      const titleLine = lines.find((line) => /\bOpenAI Codex\b/i.test(line));
+      const titleMatch = titleLine?.match(/\bOpenAI Codex\s*(\([^)]*\))?/i);
+      const title = titleMatch ? `OpenAI Codex ${titleMatch[1] ?? ""}`.trim() : "OpenAI Codex";
+      const model = lines
+        .find((line) => /^model:/i.test(line))
+        ?.replace(/^model:\s*/i, "")
+        .replace(/\s+\/model\b.*$/i, "")
+        .trim();
+      const directory = lines
+        .find((line) => /^directory:/i.test(line))
+        ?.replace(/^directory:\s*/i, "")
+        .trim();
+      const permissions = lines
+        .find((line) => /^permissions:/i.test(line))
+        ?.replace(/^permissions:\s*/i, "")
+        .trim();
+      const tipIndex = lines.findIndex((line) => /^Tip:?\b/i.test(line));
+      const tip =
+        tipIndex >= 0
+          ? lines[tipIndex].replace(/^Tip:?\s*/i, "").trim() || lines[tipIndex + 1]?.replace(/^[›>]\s*/, "").trim()
+          : "";
+      const welcomeRows: ConversationLine[] = [{ text: title }];
+
+      if (model) welcomeRows.push({ text: `model: ${model}`, muted: true });
+      if (directory) welcomeRows.push({ text: `directory: ${directory}`, muted: true });
+      if (permissions) welcomeRows.push({ text: `permissions: ${permissions}`, muted: true });
+      if (tip) welcomeRows.push({ text: `Tip: ${tip}`, muted: true });
+
+      return welcomeRows;
+    }
+
+    function upsertCodexWelcomeMessage(rows: ConversationLine[]) {
+      const welcomeRows = extractCodexWelcomeRows(rows);
+      const welcomeText = buildTextFromRows(welcomeRows);
+      if (!welcomeText.trim()) return false;
+
+      const now = Date.now();
+      const messageId = codexWelcomeMessageIdRef.current ?? createConversationId();
+      codexWelcomeMessageIdRef.current = messageId;
+
+      setConversationMessages((current) => {
+        const existingIndex = current.findIndex((message) => message.id === messageId);
+        if (existingIndex >= 0) {
+          const existing = current[existingIndex];
+          if (existing.text === welcomeText && areConversationLinesEqual(existing.lines, welcomeRows)) {
+            return current;
+          }
+
+          const nextMessages = [...current];
+          nextMessages[existingIndex] = {
+            ...existing,
+            text: welcomeText,
+            lines: welcomeRows,
+            updatedAt: now,
+          };
+          return nextMessages;
+        }
+
+        const nextMessage: ConversationMessage = {
+          id: messageId,
+          role: "terminal",
+          kind: "tui",
+          text: welcomeText,
+          lines: welcomeRows,
+          createdAt: now,
+          updatedAt: now,
+        };
+
+        return [...current, nextMessage].slice(-maxConversationMessages);
+      });
+
+      return true;
+    }
+
+    function countLeadingWhitespaceColumns(text: string) {
+      let columns = 0;
+
+      for (const character of text) {
+        if (character === " ") {
+          columns += 1;
+        } else if (character === "\t") {
+          columns += 4;
+        } else {
+          break;
+        }
+      }
+
+      return columns;
+    }
+
+    function stripLeadingWhitespaceColumns(text: string, columns: number) {
+      let remainingColumns = columns;
+      let index = 0;
+
+      while (index < text.length && remainingColumns > 0) {
+        const character = text[index];
+        if (character === " ") {
+          remainingColumns -= 1;
+          index += 1;
+        } else if (character === "\t") {
+          remainingColumns -= 4;
+          index += 1;
+        } else {
+          break;
+        }
+      }
+
+      return text.slice(index);
+    }
+
+    function isTuiStatusRow(row: ConversationLine) {
+      return Boolean(getCodexStatusWord(row.text) ?? getCodexStatusFragmentWord(row.text));
+    }
+
+    function getTuiContentRowIndexes(rows: ConversationLine[]) {
+      return rows.flatMap((row, index) => (row.text.trim() && !isTuiStatusRow(row) ? [index] : []));
+    }
+
+    function looksLikeIntentionalLeadingIndent(text: string, hasFollowingContent: boolean) {
+      const trimmedText = text.trimStart();
+      if (!trimmedText) return false;
+
+      if (/^(?:[-*+]\s|\d+[.)]\s|>\s|\|)/.test(trimmedText)) return true;
+      if (/^[}\])]/.test(trimmedText)) return true;
+
+      return (
+        !hasFollowingContent &&
+        /^(?:const|let|var|function|class|import|export|return|if|else|for|while|switch|case|try|catch|finally|def|from|SELECT|UPDATE|INSERT|DELETE|CREATE)\b/i.test(
+          trimmedText,
+        )
+      );
+    }
+
+    function normalizeTuiDialogIndentation(rows: ConversationLine[]) {
+      const contentRowIndexes = getTuiContentRowIndexes(rows);
+      if (contentRowIndexes.length === 0) return rows;
+
+      let nextRows = rows;
+      const commonIndent = Math.min(
+        ...contentRowIndexes.map((index) => countLeadingWhitespaceColumns(nextRows[index].text)),
+      );
+
+      if (commonIndent > 0 && Number.isFinite(commonIndent)) {
+        nextRows = nextRows.map((row, index) =>
+          contentRowIndexes.includes(index)
+            ? { ...row, text: stripLeadingWhitespaceColumns(row.text, commonIndent) }
+            : row,
+        );
+      }
+
+      const firstContentIndex = contentRowIndexes[0];
+      const firstContentRow = nextRows[firstContentIndex];
+      const firstLineIndent = countLeadingWhitespaceColumns(firstContentRow.text);
+      if (
+        firstLineIndent > 0 &&
+        firstLineIndent <= 6 &&
+        !looksLikeIntentionalLeadingIndent(firstContentRow.text, contentRowIndexes.length > 1)
+      ) {
+        const adjustedRows = [...nextRows];
+        adjustedRows[firstContentIndex] = { ...firstContentRow, text: firstContentRow.text.trimStart() };
+        return adjustedRows;
+      }
+
+      return nextRows;
+    }
+
     function truncateConversationRows(rows: ConversationLine[]) {
       let remainingChars = maxLiveTuiSnapshotChars;
       const truncatedRows: ConversationLine[] = [];
@@ -833,7 +1014,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         rows = nextRows;
       }
 
-      rows = compactConversationRows(trimConversationRows(rows));
+      rows = compactConversationRows(normalizeTuiDialogIndentation(trimConversationRows(rows)));
       const text = buildTextFromRows(rows);
       if (text.length <= maxLiveTuiSnapshotChars) return rows;
 
@@ -909,7 +1090,8 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     }
 
     function upsertLiveTuiMessage(rows: ConversationLine[]) {
-      if (!dialogConversationStartedRef.current) return;
+      const hasCodexWelcome = upsertCodexWelcomeMessage(rows);
+      if (!dialogConversationStartedRef.current && !hasCodexWelcome) return;
 
       const normalizedRows = normalizeSnapshotRows(rows);
       const nextTranscriptRows = compactConversationRows(
@@ -1089,6 +1271,11 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       outputQueueRef.current = [];
       outputWriterActiveRef.current = false;
       resetLiveTuiSnapshotState();
+      if (codexWelcomeMessageIdRef.current) {
+        const messageId = codexWelcomeMessageIdRef.current;
+        codexWelcomeMessageIdRef.current = null;
+        setConversationMessages((current) => current.filter((message) => message.id !== messageId));
+      }
       setTuiContextUsage(null);
       if (outputCursorTimerRef.current) {
         window.clearTimeout(outputCursorTimerRef.current);
