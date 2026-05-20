@@ -21,13 +21,17 @@ const browserPreviewMessage =
   "Browser preview mode: native terminal sessions run only inside the Tauri app.";
 const conversationOutputMergeWindowMs = 1200;
 const maxConversationMessages = 160;
+const liveTuiSnapshotDebounceMs = 80;
+const maxLiveTuiSnapshotChars = 6000;
 
 type ConversationRole = "user" | "terminal";
+type ConversationMessageKind = "normal" | "tui";
 type TerminalViewMode = "dialog" | "terminal";
 
 interface ConversationMessage {
   id: string;
   role: ConversationRole;
+  kind?: ConversationMessageKind;
   text: string;
   createdAt: number;
   updatedAt: number;
@@ -94,6 +98,10 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     const lastResizeRef = useRef<{ cols: number; rows: number } | null>(null);
     const recentUserInputsRef = useRef<string[]>([]);
     const pendingEchoInputsRef = useRef<string[]>([]);
+    const liveTuiMessageIdRef = useRef<string | null>(null);
+    const liveTuiSnapshotTimerRef = useRef<number | null>(null);
+    const liveTuiOutputQueuedRef = useRef(false);
+    const liveTuiSnapshotStartRowRef = useRef<number | null>(null);
     const [session, setSession] = useState<TerminalStarted | null>(null);
     const [isStarting, setIsStarting] = useState(false);
     const [conversationMessages, setConversationMessages] = useState<ConversationMessage[]>([]);
@@ -152,10 +160,24 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     function hasDynamicTerminalControl(value: string) {
       return (
         hasStandaloneCarriageReturn(value) ||
-        /\x1b\[[0-?]*[ -/]*[ABCDGJKSTfHLsu]/.test(value) ||
-        /\x1b\[\?[0-9;]*(?:h|l)/.test(value) ||
+        /\x1b\[[0-?]*[ -/]*[ABCDHSTfHLsu]/.test(value) ||
+        hasInteractivePrivateModeControl(value) ||
         /\x1b[78=>]/.test(value)
       );
+    }
+
+    function hasInteractivePrivateModeControl(value: string) {
+      const interactivePrivateModes = new Set(["47", "1000", "1002", "1003", "1005", "1006", "1015", "1047", "1048", "1049"]);
+      const matches = value.matchAll(/\x1b\[\?([0-9;]*)(?:h|l)/g);
+
+      for (const match of matches) {
+        const modes = match[1].split(";").filter(Boolean);
+        if (modes.some((mode) => interactivePrivateModes.has(mode))) {
+          return true;
+        }
+      }
+
+      return false;
     }
 
     function looksLikeCodexStatusFrame(value: string) {
@@ -171,10 +193,6 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
 
     function shouldUseLiveTerminalOutput(value: string) {
       return hasDynamicTerminalControl(value) || looksLikeCodexStatusFrame(value);
-    }
-
-    function activateTerminalView() {
-      setViewMode("terminal");
     }
 
     function stripPromptPrefix(line: string) {
@@ -203,6 +221,195 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       return lines.join("\n").replace(/\n{4,}/g, "\n\n\n").trim();
     }
 
+    function stripPromptPrefixForSnapshot(line: string) {
+      const powerShellPrompt = line.match(/^PS\s.+?>\s*(.*)$/);
+      if (powerShellPrompt) return powerShellPrompt[1].trimEnd();
+
+      const shellPrompt = line.match(/^[\w.-]+@[\w.-]+:.*[#$]\s*(.*)$/);
+      if (shellPrompt) return shellPrompt[1].trimEnd();
+
+      const simpleShellPrompt = line.match(/^[#$]\s+(.*)$/);
+      if (simpleShellPrompt) return simpleShellPrompt[1].trimEnd();
+
+      return line.trimEnd();
+    }
+
+    function normalizeEchoComparison(value: string) {
+      return value.replace(/\s+/g, " ").trim();
+    }
+
+    function dropWrappedEchoPrefix(lines: string[]) {
+      const recentInputs = recentUserInputsRef.current
+        .map(normalizeEchoComparison)
+        .filter(Boolean)
+        .sort((first, second) => second.length - first.length);
+
+      for (const input of recentInputs) {
+        let joinedLines = "";
+
+        for (let index = 0; index < Math.min(lines.length, 8); index += 1) {
+          joinedLines += lines[index].trimEnd();
+          const normalizedJoinedLines = normalizeEchoComparison(joinedLines);
+          if (!normalizedJoinedLines) continue;
+
+          if (normalizedJoinedLines === input) {
+            return lines.slice(index + 1);
+          }
+
+          if (!input.startsWith(normalizedJoinedLines)) {
+            break;
+          }
+        }
+      }
+
+      return lines;
+    }
+
+    function formatTerminalSnapshotText(value: string) {
+      const recentUserInputs = new Set(recentUserInputsRef.current.map((input) => input.trim()).filter(Boolean));
+      let lines = value
+        .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "")
+        .split("\n")
+        .map(stripPromptPrefixForSnapshot)
+        .filter((line) => {
+          const trimmedLine = line.trim();
+          return !trimmedLine || !recentUserInputs.has(trimmedLine);
+        });
+
+      lines = dropWrappedEchoPrefix(lines);
+
+      while (lines.length > 0 && !lines[0].trim()) {
+        lines.shift();
+      }
+      while (lines.length > 0 && !lines[lines.length - 1].trim()) {
+        lines.pop();
+      }
+
+      const compactLines: string[] = [];
+      let blankLineCount = 0;
+      for (const line of lines) {
+        if (!line.trim()) {
+          blankLineCount += 1;
+          if (blankLineCount <= 2) {
+            compactLines.push("");
+          }
+          continue;
+        }
+
+        blankLineCount = 0;
+        compactLines.push(line);
+      }
+
+      const text = compactLines.join("\n").replace(/\n{4,}/g, "\n\n\n").trimEnd();
+      if (text.length <= maxLiveTuiSnapshotChars) return text;
+
+      return `${text.slice(0, maxLiveTuiSnapshotChars).trimEnd()}\n...`;
+    }
+
+    function getTerminalScreenText() {
+      const terminal = terminalRef.current;
+      if (!terminal) return "";
+
+      const buffer = terminal.buffer.active;
+      const visibleRows = Math.max(terminal.rows || 24, 1);
+      const viewportStart = Math.max(0, Math.min(buffer.baseY, buffer.length - visibleRows));
+      const snapshotStart =
+        buffer.type === "alternate"
+          ? 0
+          : Math.max(viewportStart, liveTuiSnapshotStartRowRef.current ?? viewportStart);
+      const start = Math.min(snapshotStart, Math.max(buffer.length - 1, 0));
+      const end = Math.min(buffer.length, start + visibleRows);
+      const lines: string[] = [];
+
+      for (let row = start; row < end; row += 1) {
+        const line = buffer.getLine(row);
+        if (line) {
+          lines.push(line.translateToString(true));
+        }
+      }
+
+      return formatTerminalSnapshotText(lines.join("\n"));
+    }
+
+    function clearLiveTuiSnapshotTimer() {
+      if (!liveTuiSnapshotTimerRef.current) return;
+
+      window.clearTimeout(liveTuiSnapshotTimerRef.current);
+      liveTuiSnapshotTimerRef.current = null;
+    }
+
+    function resetLiveTuiSnapshotState() {
+      clearLiveTuiSnapshotTimer();
+      liveTuiMessageIdRef.current = null;
+      liveTuiOutputQueuedRef.current = false;
+      liveTuiSnapshotStartRowRef.current = null;
+    }
+
+    function markLiveTuiSnapshotStart() {
+      if (liveTuiSnapshotStartRowRef.current !== null) return;
+
+      const terminal = terminalRef.current;
+      if (!terminal) return;
+
+      const buffer = terminal.buffer.active;
+      liveTuiSnapshotStartRowRef.current =
+        buffer.type === "alternate" ? 0 : Math.max(0, Math.min(buffer.baseY + buffer.cursorY, buffer.length - 1));
+    }
+
+    function upsertLiveTuiMessage(text: string) {
+      const normalizedText = formatTerminalSnapshotText(text);
+      if (!normalizedText.trim()) return;
+
+      const now = Date.now();
+      const messageId = liveTuiMessageIdRef.current ?? createConversationId();
+      liveTuiMessageIdRef.current = messageId;
+
+      setConversationMessages((current) => {
+        const existingIndex = current.findIndex((message) => message.id === messageId);
+        if (existingIndex >= 0) {
+          const existing = current[existingIndex];
+          if (existing.text === normalizedText && existing.kind === "tui") {
+            return current;
+          }
+
+          const nextMessages = [...current];
+          nextMessages[existingIndex] = {
+            ...existing,
+            kind: "tui",
+            text: normalizedText,
+            updatedAt: now,
+          };
+          return nextMessages;
+        }
+
+        const nextMessage: ConversationMessage = {
+          id: messageId,
+          role: "terminal",
+          kind: "tui",
+          text: normalizedText,
+          createdAt: now,
+          updatedAt: now,
+        };
+
+        return [...current, nextMessage].slice(-maxConversationMessages);
+      });
+    }
+
+    function captureLiveTuiSnapshot() {
+      const snapshot = getTerminalScreenText();
+      if (snapshot.trim()) {
+        upsertLiveTuiMessage(snapshot);
+      }
+    }
+
+    function scheduleLiveTuiSnapshot() {
+      clearLiveTuiSnapshotTimer();
+      liveTuiSnapshotTimerRef.current = window.setTimeout(() => {
+        liveTuiSnapshotTimerRef.current = null;
+        captureLiveTuiSnapshot();
+      }, liveTuiSnapshotDebounceMs);
+    }
+
     function consumePendingEchoLine(line: string) {
       const normalizedLine = line.trim();
       if (!normalizedLine) return false;
@@ -213,7 +420,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
           return true;
         }
 
-        if (pendingInput.startsWith(`${normalizedLine} `)) {
+        if (pendingInput.startsWith(normalizedLine)) {
           pendingEchoInputsRef.current[index] = pendingInput.slice(normalizedLine.length).trimStart();
           return true;
         }
@@ -235,6 +442,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       if (!normalizedText.trim()) return;
 
       if (role === "user") {
+        resetLiveTuiSnapshotState();
         rememberUserConversationInput(normalizedText);
       }
 
@@ -244,6 +452,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         if (
           role === "terminal" &&
           last?.role === "terminal" &&
+          (last.kind ?? "normal") !== "tui" &&
           now - last.updatedAt <= conversationOutputMergeWindowMs
         ) {
           return [
@@ -256,22 +465,23 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
           ].slice(-maxConversationMessages);
         }
 
-        return [
-          ...current,
-          {
-            id: createConversationId(),
-            role,
-            text: normalizedText,
-            createdAt: now,
-            updatedAt: now,
-          },
-        ].slice(-maxConversationMessages);
+        const nextMessage: ConversationMessage = {
+          id: createConversationId(),
+          role,
+          kind: "normal",
+          text: normalizedText,
+          createdAt: now,
+          updatedAt: now,
+        };
+
+        return [...current, nextMessage].slice(-maxConversationMessages);
       });
     }
 
     function clearOutputQueue() {
       outputQueueRef.current = [];
       outputWriterActiveRef.current = false;
+      resetLiveTuiSnapshotState();
       if (outputCursorTimerRef.current) {
         window.clearTimeout(outputCursorTimerRef.current);
         outputCursorTimerRef.current = null;
@@ -283,6 +493,8 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     function discardQueuedOutput() {
       outputQueueRef.current = [];
       outputWriterActiveRef.current = false;
+      liveTuiOutputQueuedRef.current = false;
+      clearLiveTuiSnapshotTimer();
       revealCursorForInput();
     }
 
@@ -333,17 +545,34 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
 
       if (!terminal || !next) {
         outputWriterActiveRef.current = false;
+        if (terminal && liveTuiOutputQueuedRef.current) {
+          liveTuiOutputQueuedRef.current = false;
+          scheduleLiveTuiSnapshot();
+        } else {
+          liveTuiOutputQueuedRef.current = false;
+        }
         revealCursorAfterOutputSettles();
         return;
       }
 
-      terminal.write(next, pumpTerminalOutput);
+      terminal.write(next, () => {
+        if (liveTuiOutputQueuedRef.current) {
+          scheduleLiveTuiSnapshot();
+        }
+        pumpTerminalOutput();
+      });
     }
 
     function enqueueTerminalOutput(data: string) {
       if (!data) return;
 
-      if (!shouldUseLiveTerminalOutput(data)) {
+      const useLiveTerminalOutput =
+        shouldUseLiveTerminalOutput(data) || terminalRef.current?.buffer.active.type === "alternate";
+
+      if (useLiveTerminalOutput) {
+        markLiveTuiSnapshotStart();
+        liveTuiOutputQueuedRef.current = true;
+      } else {
         appendConversationMessage("terminal", data);
       }
       suppressCursorDuringOutput();
@@ -651,9 +880,12 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       scheduleFitAndResize();
 
       const bufferDisposable = terminal.buffer.onBufferChange((buffer) => {
-        host.classList.toggle("terminal-tui-active", buffer.type === "alternate");
-        if (buffer.type === "alternate") {
-          activateTerminalView();
+        const isAlternateBuffer = buffer.type === "alternate";
+        host.classList.toggle("terminal-tui-active", isAlternateBuffer);
+        if (isAlternateBuffer) {
+          liveTuiSnapshotStartRowRef.current = 0;
+          liveTuiOutputQueuedRef.current = true;
+          scheduleLiveTuiSnapshot();
         }
       });
 
@@ -779,7 +1011,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
           aria-label="对话记录"
         >
           {conversationMessages.map((message) => (
-            <div className={`terminal-dialog-row ${message.role}`} key={message.id}>
+            <div className={`terminal-dialog-row ${message.role} ${message.kind ?? "normal"}`} key={message.id}>
               <div className="terminal-dialog-bubble">{message.text}</div>
             </div>
           ))}

@@ -1573,6 +1573,20 @@ textarea {
   font-family: "Cascadia Mono", "Cascadia Code", "JetBrains Mono", Consolas, "SFMono-Regular", monospace;
 }
 
+.terminal-dialog-row.tui .terminal-dialog-bubble {
+  max-width: min(92%, 1040px);
+  padding: 11px 13px;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--terminal-fg, #d8e1e8) 10%, var(--terminal-panel, #0c1118)),
+      color-mix(in srgb, var(--terminal-fg, #d8e1e8) 6%, var(--terminal-bg, #070b10))
+    );
+  border-color: color-mix(in srgb, var(--terminal-accent, #8ab4ff) 28%, var(--terminal-border, #1a2433));
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .terminal-host {
   position: absolute;
   inset: 0;
