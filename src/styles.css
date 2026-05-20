@@ -1614,6 +1614,21 @@ textarea {
   white-space: pre-wrap;
 }
 
+.terminal-dialog-lines {
+  display: block;
+}
+
+.terminal-dialog-line {
+  display: block;
+  min-height: var(--terminal-dialog-line-height, 20px);
+  white-space: pre-wrap;
+}
+
+.terminal-dialog-line.muted {
+  color: color-mix(in srgb, var(--terminal-muted, #93a2ae) 92%, var(--terminal-fg, #d8e1e8));
+  opacity: 0.86;
+}
+
 .terminal-dialog-row.user .terminal-dialog-bubble {
   color: #ffffff;
   background:

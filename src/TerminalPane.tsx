@@ -219,6 +219,10 @@ function formatGridWeights(weights: number[]) {
   return weights.map((weight) => `minmax(0, ${Math.max(0.2, weight).toFixed(4)}fr)`).join(" ");
 }
 
+function normalizeGridWeights(weights: number[], count: number) {
+  return weights.length === count ? weights : createEqualWeights(count);
+}
+
 function getResizeBoundaryPercent(weights: number[], index: number) {
   const total = weights.reduce((sum, weight) => sum + weight, 0) || 1;
   const offset = weights.slice(0, index + 1).reduce((sum, weight) => sum + weight, 0);
@@ -427,6 +431,14 @@ export function TerminalPane({
     request: TerminalCommandRequest;
   } | null>(null);
   const [composerInputValue, setComposerInputValue] = useState("");
+  const renderColumnWeights = useMemo(
+    () => normalizeGridWeights(columnWeights, activeLayout.columns),
+    [activeLayout.columns, columnWeights],
+  );
+  const renderRowWeights = useMemo(
+    () => normalizeGridWeights(rowWeights, activeLayout.rows),
+    [activeLayout.rows, rowWeights],
+  );
   const activeProjectBinding = useMemo(
     () => ({
       id: activeProjectId || null,
@@ -620,7 +632,7 @@ export function TerminalPane({
       pointerId: event.pointerId,
       startClientX: event.clientX,
       startClientY: event.clientY,
-      startSizes: axis === "column" ? columnWeights : rowWeights,
+      startSizes: axis === "column" ? renderColumnWeights : renderRowWeights,
     };
     setIsResizingLayout(true);
   }
@@ -1106,8 +1118,8 @@ export function TerminalPane({
         className={`terminal-surface ${isResizingLayout ? "resizing" : ""} ${isDraggingTile ? "tile-dragging" : ""}`}
         ref={terminalSurfaceRef}
         style={{
-          gridTemplateColumns: formatGridWeights(columnWeights),
-          gridTemplateRows: formatGridWeights(rowWeights),
+          gridTemplateColumns: formatGridWeights(renderColumnWeights),
+          gridTemplateRows: formatGridWeights(renderRowWeights),
         } as CSSProperties}
       >
         {terminalTabs.tabs.map((tab) => {
@@ -1191,7 +1203,7 @@ export function TerminalPane({
           </div>
         )}
         {activeLayout.columns > 1 &&
-          columnWeights.slice(0, -1).map((_, index) => (
+          renderColumnWeights.slice(0, -1).map((_, index) => (
             <div
               aria-label="调整终端列宽"
               aria-orientation="vertical"
@@ -1199,7 +1211,7 @@ export function TerminalPane({
               key={`column-${index}`}
               role="separator"
               style={{
-                left: `calc(10px + (100% - 20px) * ${getResizeBoundaryPercent(columnWeights, index) / 100})`,
+                left: `calc(10px + (100% - 20px) * ${getResizeBoundaryPercent(renderColumnWeights, index) / 100})`,
               }}
               title="拖动调整列宽，双击重置"
               onDoubleClick={resetLayoutWeights}
@@ -1210,7 +1222,7 @@ export function TerminalPane({
             />
           ))}
         {activeLayout.rows > 1 &&
-          rowWeights.slice(0, -1).map((_, index) => (
+          renderRowWeights.slice(0, -1).map((_, index) => (
             <div
               aria-label="调整终端行高"
               aria-orientation="horizontal"
@@ -1218,7 +1230,7 @@ export function TerminalPane({
               key={`row-${index}`}
               role="separator"
               style={{
-                top: `calc(10px + (100% - 20px) * ${getResizeBoundaryPercent(rowWeights, index) / 100})`,
+                top: `calc(10px + (100% - 20px) * ${getResizeBoundaryPercent(renderRowWeights, index) / 100})`,
               }}
               title="拖动调整行高，双击重置"
               onDoubleClick={resetLayoutWeights}

@@ -25,16 +25,37 @@ const liveTuiSnapshotDebounceMs = 80;
 const maxLiveTuiSnapshotChars = 6000;
 const composerSubmitDelayMs = 0;
 const codexStatusWords = ["Working", "Thinking", "Reading", "Editing", "Running"];
+const terminalViewModeStorageKey = "code-terminal-view-mode";
 
 type ConversationRole = "user" | "terminal";
 type ConversationMessageKind = "normal" | "tui";
 type TerminalViewMode = "dialog" | "terminal";
+
+interface ConversationLine {
+  text: string;
+  muted?: boolean;
+}
+
+interface TerminalBufferCellSnapshot {
+  getChars(): string;
+  getWidth(): number;
+  getFgColor(): number;
+  isDim(): number;
+  isFgPalette(): boolean;
+  isFgRGB(): boolean;
+}
+
+interface TerminalBufferLineSnapshot {
+  readonly length: number;
+  getCell(x: number): TerminalBufferCellSnapshot | undefined;
+}
 
 interface ConversationMessage {
   id: string;
   role: ConversationRole;
   kind?: ConversationMessageKind;
   text: string;
+  lines?: ConversationLine[];
   createdAt: number;
   updatedAt: number;
 }
@@ -115,7 +136,14 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     const [isStarting, setIsStarting] = useState(false);
     const [conversationMessages, setConversationMessages] = useState<ConversationMessage[]>([]);
     const [tuiContextUsage, setTuiContextUsage] = useState<TuiContextUsage | null>(null);
-    const [viewMode, setViewMode] = useState<TerminalViewMode>("dialog");
+    const [viewMode, setViewMode] = useState<TerminalViewMode>(() => {
+      try {
+        const savedViewMode = localStorage.getItem(terminalViewModeStorageKey);
+        return savedViewMode === "dialog" || savedViewMode === "terminal" ? savedViewMode : "terminal";
+      } catch {
+        return "terminal";
+      }
+    });
 
     function shouldSuppressTerminalError(err: unknown) {
       const message = String(err);
@@ -289,6 +317,11 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       if (simpleShellPrompt) return simpleShellPrompt[1].trimEnd();
 
       return line.trimEnd();
+    }
+
+    function stripPromptPrefixForSnapshotRow(row: ConversationLine): ConversationLine {
+      const strippedText = stripPromptPrefixForSnapshot(row.text);
+      return strippedText === row.text ? row : { ...row, text: strippedText };
     }
 
     function normalizeEchoComparison(value: string) {
@@ -465,60 +498,207 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       return lines;
     }
 
-    function formatTerminalSnapshotText(value: string) {
-      const recentUserInputs = new Set(recentUserInputsRef.current.map((input) => input.trim()).filter(Boolean));
-      let lines = value
-        .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "")
-        .split("\n")
-        .map(stripPromptPrefixForSnapshot);
-      const shouldCleanCodexChrome = hasCodexTuiChrome(lines);
-
-      lines = lines
-        .map((line) => cleanCodexTuiChromeLine(line, shouldCleanCodexChrome))
-        .filter((line) => {
-          const trimmedLine = line.trim();
-          return (
-            !trimmedLine ||
-            (!recentUserInputs.has(trimmedLine) &&
-              (getCodexStatusFragmentWord(trimmedLine) ||
-                !isRecentInputSnapshotEchoFragment(line, shouldCleanCodexChrome)))
-          );
-        });
-
-      lines = dropWrappedEchoPrefix(lines);
-      lines = cleanCodexSnapshotLines(lines, shouldCleanCodexChrome);
-
-      while (lines.length > 0 && !lines[0].trim()) {
-        lines.shift();
+    function trimConversationRows(rows: ConversationLine[]) {
+      const nextRows = [...rows];
+      while (nextRows.length > 0 && !nextRows[0].text.trim()) {
+        nextRows.shift();
       }
-      while (lines.length > 0 && !lines[lines.length - 1].trim()) {
-        lines.pop();
+      while (nextRows.length > 0 && !nextRows[nextRows.length - 1].text.trim()) {
+        nextRows.pop();
       }
+      return nextRows;
+    }
 
-      const compactLines: string[] = [];
+    function compactConversationRows(rows: ConversationLine[]) {
+      const compactRows: ConversationLine[] = [];
       let blankLineCount = 0;
-      for (const line of lines) {
-        if (!line.trim()) {
+
+      for (const row of rows) {
+        if (!row.text.trim()) {
           blankLineCount += 1;
           if (blankLineCount <= 2) {
-            compactLines.push("");
+            compactRows.push({ text: "" });
           }
           continue;
         }
 
         blankLineCount = 0;
-        compactLines.push(line);
+        compactRows.push(row);
       }
 
-      const text = compactLines.join("\n").replace(/\n{4,}/g, "\n\n\n").trimEnd();
+      return compactRows;
+    }
+
+    function truncateConversationRows(rows: ConversationLine[]) {
+      let remainingChars = maxLiveTuiSnapshotChars;
+      const truncatedRows: ConversationLine[] = [];
+
+      for (const row of rows) {
+        const separatorLength = truncatedRows.length > 0 ? 1 : 0;
+        const availableChars = remainingChars - separatorLength;
+        if (availableChars <= 0) break;
+
+        if (row.text.length <= availableChars) {
+          truncatedRows.push(row);
+          remainingChars -= row.text.length + separatorLength;
+          continue;
+        }
+
+        const truncatedText = row.text.slice(0, availableChars).trimEnd();
+        if (truncatedText) {
+          truncatedRows.push({ ...row, text: truncatedText });
+        }
+        break;
+      }
+
+      const text = truncatedRows.map((row) => row.text).join("\n");
+      if (text.length <= maxLiveTuiSnapshotChars) return truncatedRows;
+
+      return truncatedRows;
+    }
+
+    function buildTextFromRows(rows: ConversationLine[]) {
+      return rows.map((row) => row.text).join("\n").replace(/\n{4,}/g, "\n\n\n").trimEnd();
+    }
+
+    function normalizeSnapshotRows(rawRows: ConversationLine[]) {
+      return formatTerminalSnapshotRows(rawRows);
+    }
+
+    function areConversationLinesEqual(first?: ConversationLine[], second?: ConversationLine[]) {
+      if (!first || !second || first.length !== second.length) return false;
+
+      return first.every(
+        (line, index) => line.text === second[index].text && Boolean(line.muted) === Boolean(second[index].muted),
+      );
+    }
+
+    function isMutedTerminalCell(cell: TerminalBufferCellSnapshot) {
+      if (cell.isDim()) return true;
+      if (cell.isFgPalette()) {
+        const color = cell.getFgColor();
+        return [8, 240, 241, 242, 243, 244, 245].includes(color);
+      }
+      if (cell.isFgRGB()) {
+        const color = cell.getFgColor();
+        const red = (color >> 16) & 0xff;
+        const green = (color >> 8) & 0xff;
+        const blue = color & 0xff;
+        const max = Math.max(red, green, blue);
+        const min = Math.min(red, green, blue);
+        return max - min <= 18 && max >= 72 && max <= 188;
+      }
+
+      return false;
+    }
+
+    function getStyledBufferLine(line: TerminalBufferLineSnapshot, columns: number): ConversationLine {
+      const maxColumns = Math.min(line.length, columns);
+      let text = "";
+      let lastTextIndex = 0;
+      let visibleCellCount = 0;
+      let mutedCellCount = 0;
+
+      for (let column = 0; column < maxColumns; column += 1) {
+        const cell = line.getCell(column);
+        if (cell?.getWidth() === 0) continue;
+
+        const chars = cell?.getChars() ?? "";
+        text += chars || " ";
+
+        if (chars) {
+          visibleCellCount += 1;
+          lastTextIndex = text.length;
+          if (cell && isMutedTerminalCell(cell)) {
+            mutedCellCount += 1;
+          }
+        }
+      }
+
+      const trimmedText = text.slice(0, lastTextIndex);
+      const muted = visibleCellCount > 0 && mutedCellCount / visibleCellCount >= 0.55;
+      return muted ? { text: trimmedText, muted: true } : { text: trimmedText };
+    }
+
+    function formatTerminalSnapshotRows(rawRows: ConversationLine[]) {
+      const recentUserInputs = new Set(recentUserInputsRef.current.map((input) => input.trim()).filter(Boolean));
+      let rows = rawRows
+        .map((row) => ({
+          ...row,
+          text: row.text.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, ""),
+        }))
+        .map(stripPromptPrefixForSnapshotRow);
+      const shouldCleanCodexChrome = hasCodexTuiChrome(rows.map((row) => row.text));
+
+      rows = rows
+        .map((row) => ({
+          ...row,
+          text: cleanCodexTuiChromeLine(row.text, shouldCleanCodexChrome),
+        }))
+        .filter((row) => {
+          const trimmedLine = row.text.trim();
+          return (
+            !trimmedLine ||
+            (!recentUserInputs.has(trimmedLine) &&
+              (getCodexStatusFragmentWord(trimmedLine) ||
+                !isRecentInputSnapshotEchoFragment(row.text, shouldCleanCodexChrome)))
+          );
+        });
+
+      const droppedEchoPrefixLines = dropWrappedEchoPrefix(rows.map((row) => row.text));
+      if (droppedEchoPrefixLines.length !== rows.length) {
+        rows = rows.slice(rows.length - droppedEchoPrefixLines.length);
+      }
+
+      const cleanedLines = cleanCodexSnapshotLines(
+        rows.map((row) => row.text),
+        shouldCleanCodexChrome,
+      );
+      if (cleanedLines.length !== rows.length || cleanedLines.some((line, index) => line !== rows[index]?.text)) {
+        const nextRows: ConversationLine[] = [];
+        let searchIndex = 0;
+
+        for (const cleanedLine of cleanedLines) {
+          const foundIndex = rows.findIndex((row, index) => index >= searchIndex && row.text === cleanedLine);
+          if (foundIndex >= 0) {
+            nextRows.push(rows[foundIndex]);
+            searchIndex = foundIndex + 1;
+          } else {
+            const statusIndex = rows.findIndex(
+              (row, index) =>
+                index >= searchIndex &&
+                (getCodexStatusWord(row.text) ?? getCodexStatusFragmentWord(row.text)) === cleanedLine,
+            );
+            if (statusIndex >= 0) {
+              nextRows.push({ ...rows[statusIndex], text: cleanedLine });
+              searchIndex = statusIndex + 1;
+            } else {
+              nextRows.push({ text: cleanedLine });
+            }
+          }
+        }
+
+        rows = nextRows;
+      }
+
+      rows = compactConversationRows(trimConversationRows(rows));
+      const text = buildTextFromRows(rows);
+      if (text.length <= maxLiveTuiSnapshotChars) return rows;
+
+      return [...truncateConversationRows(rows), { text: "...", muted: true }];
+    }
+
+    function formatTerminalSnapshotText(value: string) {
+      const rows = normalizeSnapshotRows(value.split("\n").map((text) => ({ text })));
+      const text = buildTextFromRows(rows);
       if (text.length <= maxLiveTuiSnapshotChars) return text;
 
       return `${text.slice(0, maxLiveTuiSnapshotChars).trimEnd()}\n...`;
     }
 
-    function getTerminalScreenText() {
+    function getTerminalScreenRows() {
       const terminal = terminalRef.current;
-      if (!terminal) return "";
+      if (!terminal) return [];
 
       const buffer = terminal.buffer.active;
       const visibleRows = Math.max(terminal.rows || 24, 1);
@@ -529,18 +709,18 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
           : Math.max(viewportStart, liveTuiSnapshotStartRowRef.current ?? viewportStart);
       const start = Math.min(snapshotStart, Math.max(buffer.length - 1, 0));
       const end = Math.min(buffer.length, start + visibleRows);
-      const lines: string[] = [];
+      const rows: ConversationLine[] = [];
 
       for (let row = start; row < end; row += 1) {
         const line = buffer.getLine(row);
         if (line) {
-          lines.push(line.translateToString(true));
+          rows.push(getStyledBufferLine(line, terminal.cols || line.length));
         }
       }
 
-      const screenText = lines.join("\n");
+      const screenText = buildTextFromRows(rows);
       updateTuiContextUsageFromText(screenText);
-      return formatTerminalSnapshotText(screenText);
+      return rows;
     }
 
     function clearLiveTuiSnapshotTimer() {
@@ -575,8 +755,9 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         buffer.type === "alternate" ? 0 : Math.max(0, Math.min(buffer.baseY + buffer.cursorY, buffer.length - 1));
     }
 
-    function upsertLiveTuiMessage(text: string) {
-      const normalizedText = formatTerminalSnapshotText(text);
+    function upsertLiveTuiMessage(rows: ConversationLine[]) {
+      const normalizedRows = normalizeSnapshotRows(rows);
+      const normalizedText = buildTextFromRows(normalizedRows);
       if (!normalizedText.trim()) return;
 
       const now = Date.now();
@@ -587,7 +768,11 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         const existingIndex = current.findIndex((message) => message.id === messageId);
         if (existingIndex >= 0) {
           const existing = current[existingIndex];
-          if (existing.text === normalizedText && existing.kind === "tui") {
+          if (
+            existing.text === normalizedText &&
+            existing.kind === "tui" &&
+            areConversationLinesEqual(existing.lines, normalizedRows)
+          ) {
             return current;
           }
 
@@ -596,6 +781,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
             ...existing,
             kind: "tui",
             text: normalizedText,
+            lines: normalizedRows,
             updatedAt: now,
           };
           return nextMessages;
@@ -606,6 +792,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
           role: "terminal",
           kind: "tui",
           text: normalizedText,
+          lines: normalizedRows,
           createdAt: now,
           updatedAt: now,
         };
@@ -615,10 +802,20 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     }
 
     function captureLiveTuiSnapshot() {
-      const snapshot = getTerminalScreenText();
-      if (snapshot.trim()) {
-        upsertLiveTuiMessage(snapshot);
+      const snapshotRows = getTerminalScreenRows();
+      if (buildTextFromRows(snapshotRows).trim()) {
+        upsertLiveTuiMessage(snapshotRows);
       }
+    }
+
+    function hasLiveTuiSnapshotContext() {
+      const terminal = terminalRef.current;
+      return (
+        terminal?.buffer.active.type === "alternate" ||
+        liveTuiMessageIdRef.current !== null ||
+        liveTuiSnapshotStartRowRef.current !== null ||
+        liveTuiOutputQueuedRef.current
+      );
     }
 
     function scheduleLiveTuiSnapshot() {
@@ -627,6 +824,33 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         liveTuiSnapshotTimerRef.current = null;
         captureLiveTuiSnapshot();
       }, liveTuiSnapshotDebounceMs);
+    }
+
+    function showDialogView() {
+      setViewMode("dialog");
+      rememberTerminalViewMode("dialog");
+      window.setTimeout(() => {
+        if (hasLiveTuiSnapshotContext()) {
+          captureLiveTuiSnapshot();
+        }
+      }, 0);
+    }
+
+    function showTerminalView() {
+      setViewMode("terminal");
+      rememberTerminalViewMode("terminal");
+      window.setTimeout(() => {
+        scheduleFitAndResize();
+        terminalRef.current?.focus();
+      }, 0);
+    }
+
+    function rememberTerminalViewMode(nextViewMode: TerminalViewMode) {
+      try {
+        localStorage.setItem(terminalViewModeStorageKey, nextViewMode);
+      } catch {
+        // Ignore storage failures; the active view still changes for this session.
+      }
     }
 
     function consumePendingEchoLine(line: string) {
@@ -679,6 +903,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
             {
               ...last,
               text: `${last.text}\n${normalizedText}`.replace(/\n{4,}/g, "\n\n\n"),
+              lines: undefined,
               updatedAt: now,
             },
           ].slice(-maxConversationMessages);
@@ -689,6 +914,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
           role,
           kind: "normal",
           text: normalizedText,
+          lines: undefined,
           createdAt: now,
           updatedAt: now,
         };
@@ -1229,6 +1455,23 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       }
     }, [commandRequest?.id]);
 
+    function renderConversationText(message: ConversationMessage) {
+      if (!message.lines?.length) return message.text;
+
+      return (
+        <span className="terminal-dialog-lines">
+          {message.lines.map((line, index) => (
+            <span
+              className={`terminal-dialog-line ${line.muted ? "muted" : ""}`}
+              key={`${message.id}-${index}`}
+            >
+              {line.text || "\u00a0"}
+            </span>
+          ))}
+        </span>
+      );
+    }
+
     return (
       <div
         className={`terminal-session ${isVisible ? "visible" : ""} ${isActive ? "active" : ""} ${
@@ -1239,17 +1482,14 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
           <button
             className={viewMode === "dialog" ? "active" : ""}
             type="button"
-            onClick={() => setViewMode("dialog")}
+            onClick={showDialogView}
           >
             对话
           </button>
           <button
             className={viewMode === "terminal" ? "active" : ""}
             type="button"
-            onClick={() => {
-              setViewMode("terminal");
-              window.setTimeout(() => terminalRef.current?.focus(), 0);
-            }}
+            onClick={showTerminalView}
           >
             终端
           </button>
@@ -1274,7 +1514,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         >
           {conversationMessages.map((message) => (
             <div className={`terminal-dialog-row ${message.role} ${message.kind ?? "normal"}`} key={message.id}>
-              <div className="terminal-dialog-bubble">{message.text}</div>
+              <div className="terminal-dialog-bubble">{renderConversationText(message)}</div>
             </div>
           ))}
         </div>
