@@ -23,7 +23,7 @@ const conversationOutputMergeWindowMs = 1200;
 const maxConversationMessages = 160;
 const liveTuiSnapshotDebounceMs = 80;
 const maxLiveTuiSnapshotChars = 6000;
-const composerSubmitDelayMs = 0;
+const bracketedPasteSubmitDelayMs = 80;
 const codexStatusWords = ["Working", "Thinking", "Reading", "Editing", "Running"];
 const terminalViewModeStorageKey = "code-terminal-view-mode";
 
@@ -1071,14 +1071,14 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       void startSession();
     }
 
-    function submitRawOrQueueInput(data: string) {
+    function submitRawOrQueueInput(data: string, delayMs = 0) {
       clearPendingSubmitTimer();
 
       if (sessionIdRef.current) {
         pendingSubmitTimerRef.current = window.setTimeout(() => {
           pendingSubmitTimerRef.current = null;
           writeRawTerminalInput(data);
-        }, composerSubmitDelayMs);
+        }, delayMs);
         return;
       }
 
@@ -1093,7 +1093,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
 
       if (terminal?.modes.bracketedPasteMode) {
         sendRawOrQueueInput(`\x1b[200~${normalizedInput}\x1b[201~`);
-        submitRawOrQueueInput("\r");
+        submitRawOrQueueInput("\r", bracketedPasteSubmitDelayMs);
         return;
       }
 
