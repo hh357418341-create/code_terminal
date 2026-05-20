@@ -202,6 +202,15 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       return normalizedInput.replace(/\n/g, "\r");
     }
 
+    function echoComposerInput(input: string) {
+      const terminal = terminalRef.current;
+      const normalizedInput = input.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+      if (!terminal || normalizedInput.includes("\n")) return;
+
+      terminal.writeln("");
+      terminal.writeln(`\x1b[38;5;113m$ ${normalizedInput}\x1b[0m`);
+    }
+
     function getClipboardImageItem(dataTransfer: DataTransfer | null) {
       if (!dataTransfer) return null;
 
@@ -410,6 +419,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         const formattedInput = formatDialogInputForTerminal(input);
         const sessionId = sessionIdRef.current;
         if (sessionId) {
+          echoComposerInput(input);
           writeRawTerminalInput(`${formattedInput}\r`);
           return;
         }
