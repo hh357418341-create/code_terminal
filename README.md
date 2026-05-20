@@ -68,6 +68,55 @@ npm run bundle
 
 Windows MSI 打包会下载 WiX 工具链，网络较慢时可能需要重试。
 
+## Linux 服务器和手机访问
+
+服务器模式会在 Linux/Windows/macOS 上启动一个 HTTP Web UI，并在服务器本机创建真实 PTY。手机访问这个页面时，输入会发送到服务器上的 shell，适合用手机临时操作服务器里的 Codex 或其他 TUI。
+
+本机调试：
+
+```bash
+npm run server
+```
+
+默认监听 `127.0.0.1:8787`，浏览器打开：
+
+```text
+http://127.0.0.1:8787/
+```
+
+给局域网或手机访问时，需要显式设置 token：
+
+```bash
+CODE_TERMINAL_ADDR=0.0.0.0:8787 CODE_TERMINAL_TOKEN=change-this-token npm run server
+```
+
+手机打开：
+
+```text
+http://<server-ip>:8787/?token=change-this-token
+```
+
+也可以先构建服务器二进制：
+
+```bash
+npm run build:server
+```
+
+构建产物位于：
+
+```text
+src-tauri/target/release/code-terminal-server
+```
+
+可选环境变量：
+
+- `CODE_TERMINAL_ADDR`：监听地址，默认 `127.0.0.1:8787`。
+- `CODE_TERMINAL_TOKEN`：外部访问 token；只要监听地址不是本机回环地址就必须设置。
+- `CODE_TERMINAL_STATE`：项目列表和主题配置文件路径，默认 `$HOME/.code-terminal/workbench-state.json`。
+- `CODE_TERMINAL_DIST`：前端静态文件目录，默认当前工作目录下的 `dist`。
+
+不要把未加 HTTPS 的服务直接暴露到公网；手机远程访问建议放在 Tailscale、ZeroTier、VPN 或带 HTTPS 的反向代理后面。
+
 ## GitHub Release
 
 仓库包含 GitHub Actions 工作流：

@@ -15,8 +15,8 @@
         "title": "未选择项目",
         "width": 1280,
         "height": 820,
-        "minWidth": 960,
-        "minHeight": 480,
+        "minWidth": 360,
+        "minHeight": 420,
         "resizable": true
       }
     ],

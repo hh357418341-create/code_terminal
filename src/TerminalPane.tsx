@@ -415,6 +415,9 @@ export function TerminalPane({
   );
 
   const activeRuntime = tabRuntime[terminalTabs.activeTabId];
+  const hasComposerText = Boolean(composerInputValue.trim());
+  const canInterruptActiveTerminal = Boolean(activeRuntime?.session);
+  const composerPrimaryAction = hasComposerText ? "send" : "interrupt";
   const visibleTabs = useMemo(() => {
     if (activeLayout.displayMode === "tabs") {
       const activeTab = terminalTabs.tabs.find((tab) => tab.id === terminalTabs.activeTabId);
@@ -454,6 +457,15 @@ export function TerminalPane({
     activeTerminal.sendComposerInput(value);
     setComposerInputValue("");
     focusActiveTerminal();
+  }
+
+  function handleComposerPrimaryAction() {
+    if (hasComposerText) {
+      submitComposerInput();
+      return;
+    }
+
+    interruptActiveTerminal();
   }
 
   function handleComposerInputKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
@@ -1190,51 +1202,9 @@ export function TerminalPane({
         aria-label="对话输入"
         onSubmit={(event) => {
           event.preventDefault();
-          submitComposerInput();
+          handleComposerPrimaryAction();
         }}
       >
-        <div className="terminal-composer-toolbar">
-          <div className="terminal-composer-controls">
-            <button
-              className="terminal-composer-control"
-              disabled={!activeRuntime?.session}
-              title="中止当前终端"
-              type="button"
-              onClick={interruptActiveTerminal}
-            >
-              <Ban size={14} />
-              <span>中止</span>
-            </button>
-            <button
-              className="terminal-composer-control"
-              title="聚焦终端"
-              type="button"
-              onClick={focusActiveTerminal}
-            >
-              <Terminal size={14} />
-              <span>终端</span>
-            </button>
-            <button
-              className="terminal-composer-control"
-              disabled={!activeRuntime?.session}
-              title="停止当前终端"
-              type="button"
-              onClick={stopActiveTerminal}
-            >
-              <Square size={13} />
-              <span>停止</span>
-            </button>
-            <button
-              className="terminal-composer-control"
-              title="关闭当前会话"
-              type="button"
-              onClick={() => closeTerminalTab(terminalTabs.activeTabId)}
-            >
-              <X size={14} />
-              <span>关闭</span>
-            </button>
-          </div>
-        </div>
         <textarea
           ref={composerInputRef}
           className="terminal-composer-input"
@@ -1248,12 +1218,12 @@ export function TerminalPane({
           onPaste={handleComposerPaste}
         />
         <button
-          className="terminal-composer-send"
-          disabled={!composerInputValue.trim()}
-          title="发送"
+          className={`terminal-composer-send ${composerPrimaryAction}`}
+          disabled={!hasComposerText && !canInterruptActiveTerminal}
+          title={hasComposerText ? "发送" : "中止当前终端"}
           type="submit"
         >
-          <SendHorizontal size={16} />
+          {hasComposerText ? <SendHorizontal size={16} /> : <Ban size={16} />}
         </button>
       </form>
     </section>

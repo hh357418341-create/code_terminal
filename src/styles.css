@@ -989,9 +989,8 @@ textarea {
 .terminal-composer {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 42px;
-  grid-template-rows: auto auto;
   align-items: end;
-  gap: 8px 10px;
+  gap: 10px;
   min-width: 0;
   padding: 0 18px 16px;
   background:
@@ -1002,84 +1001,8 @@ textarea {
     );
 }
 
-.terminal-composer-toolbar {
-  display: flex;
-  grid-column: 1 / -1;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 10px;
-  min-width: 0;
-}
-
-.terminal-composer-controls {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-}
-
-.terminal-composer-controls {
-  justify-content: flex-end;
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: thin;
-  scrollbar-color: color-mix(in srgb, var(--terminal-fg, #d8e1e8) 22%, transparent) transparent;
-}
-
-.terminal-composer-controls::-webkit-scrollbar {
-  height: 3px;
-}
-
-.terminal-composer-controls::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--terminal-fg, #d8e1e8) 22%, transparent);
-  border-radius: 999px;
-}
-
-.terminal-composer-controls::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.terminal-composer-control {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  min-height: 26px;
-  flex: 0 0 auto;
-  color: var(--terminal-muted, #93a2ae);
-  background: transparent;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 11px;
-  font-weight: 660;
-  line-height: 1;
-  white-space: nowrap;
-  transition:
-    background 140ms ease,
-    color 140ms ease,
-    opacity 140ms ease;
-}
-
-.terminal-composer-control {
-  padding: 0 9px;
-  color: var(--terminal-fg, #d8e1e8);
-  background: color-mix(in srgb, var(--terminal-fg, #d8e1e8) 9%, transparent);
-  border: 1px solid color-mix(in srgb, var(--terminal-border, #24313a) 58%, transparent);
-}
-
-.terminal-composer-control:hover {
-  color: var(--terminal-fg, #d8e1e8);
-  background: color-mix(in srgb, var(--terminal-fg, #d8e1e8) 14%, transparent);
-}
-
-.terminal-composer-control:disabled {
-  cursor: not-allowed;
-  opacity: 0.42;
-}
-
 .terminal-composer-input {
   grid-column: 1;
-  grid-row: 2;
   width: 100%;
   min-height: 58px;
   max-height: 150px;
@@ -1113,7 +1036,6 @@ textarea {
 .terminal-composer-send {
   display: inline-flex;
   grid-column: 2;
-  grid-row: 2;
   align-items: center;
   justify-content: center;
   width: 42px;
@@ -1129,6 +1051,12 @@ textarea {
 
 .terminal-composer-send:hover {
   filter: brightness(1.05);
+}
+
+.terminal-composer-send.interrupt {
+  color: #ffffff;
+  background: #b84b55;
+  border-color: #d46870;
 }
 
 .terminal-composer-send:disabled {
@@ -1599,6 +1527,124 @@ textarea {
   }
 }
 
+@media (max-width: 720px) {
+  body {
+    min-width: 0;
+  }
+
+  .shell {
+    grid-template-columns: minmax(0, 1fr);
+    background: var(--terminal-bg, #070b10);
+  }
+
+  .sidebar {
+    display: none;
+  }
+
+  .workspace {
+    grid-column: 1;
+  }
+
+  .workspace-bar {
+    min-height: 48px;
+    padding: 8px 10px;
+  }
+
+  .terminal-mark,
+  .workspace-kicker,
+  .project-heading p,
+  .terminal-bar-title,
+  .terminal-layout-switch,
+  .terminal-action span,
+  .terminal-tab-main span:last-child,
+  .terminal-cell-path,
+  .terminal-cell-state {
+    display: none;
+  }
+
+  .project-heading {
+    gap: 8px;
+  }
+
+  .project-heading h2 {
+    max-width: 44vw;
+    overflow: hidden;
+    font-size: 14px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .workspace-actions,
+  .terminal-actions {
+    gap: 4px;
+  }
+
+  .terminal-bar {
+    min-height: 36px;
+    padding: 0 8px;
+  }
+
+  .terminal-pane {
+    grid-template-rows: 36px minmax(0, 1fr) auto;
+  }
+
+  .terminal-tab-main {
+    width: 30px;
+    padding: 0;
+  }
+
+  .terminal-tab-close,
+  .terminal-tab-add,
+  .terminal-action {
+    width: 28px;
+    padding: 0;
+  }
+
+  .terminal-surface {
+    gap: 6px;
+    padding: 7px 8px;
+  }
+
+  .terminal-cell {
+    grid-template-rows: 28px minmax(0, 1fr);
+    border-radius: 7px;
+  }
+
+  .terminal-cell-header {
+    grid-template-columns: minmax(0, 1fr) 22px;
+    gap: 6px;
+    padding: 0 8px;
+  }
+
+  .terminal-cell-close {
+    display: inline-flex;
+  }
+
+  .terminal-host .xterm {
+    padding: 7px 8px;
+  }
+
+  .terminal-composer {
+    grid-template-columns: minmax(0, 1fr) 38px;
+    gap: 7px;
+    padding: 0 8px 8px;
+  }
+
+  .terminal-composer-input {
+    min-height: 38px;
+    max-height: 96px;
+    padding: 8px 9px;
+    font-size: 13px;
+    resize: none;
+  }
+
+  .terminal-composer-send {
+    width: 38px;
+    height: 38px;
+    margin-bottom: 0;
+  }
+}
+
 @media (max-height: 760px) {
   .workspace-bar {
     min-height: 50px;
@@ -1659,18 +1705,8 @@ textarea {
 
   .terminal-composer {
     grid-template-columns: minmax(0, 1fr) 34px;
-    gap: 5px 8px;
+    gap: 8px;
     padding: 0 12px 8px;
-  }
-
-  .terminal-composer-toolbar {
-    gap: 6px;
-  }
-
-  .terminal-composer-control {
-    min-height: 22px;
-    padding: 0 7px;
-    font-size: 10px;
   }
 
   .terminal-composer-input {
@@ -1721,20 +1757,6 @@ textarea {
   .terminal-composer {
     grid-template-columns: minmax(0, 1fr) 32px;
     padding: 0 10px 6px;
-  }
-
-  .terminal-composer-toolbar {
-    align-items: stretch;
-  }
-
-  .terminal-composer-control {
-    min-width: 26px;
-    min-height: 22px;
-    padding: 0 6px;
-  }
-
-  .terminal-composer-control span {
-    display: none;
   }
 
   .terminal-composer-input {

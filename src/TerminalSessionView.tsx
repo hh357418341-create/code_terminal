@@ -375,7 +375,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         setSession(started);
         terminal.clear();
         terminal.writeln(`\x1b[38;5;113m${started.shell}\x1b[0m  \x1b[38;5;245m${started.cwd}\x1b[0m`);
-        if (!isTauriRuntime()) {
+        if (!isTauriRuntime() && started.shell === "Browser preview") {
           terminal.writeln(`\x1b[38;5;245m${browserPreviewMessage}\x1b[0m`);
         }
         scheduleFitAndResize();

@@ -13,7 +13,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { invoke, openDialog, setWindowTitle } from "./tauriRuntime";
+import { canUseNativeOpenDialog, invoke, openDialog, setWindowTitle } from "./tauriRuntime";
 import { TerminalPane } from "./TerminalPane";
 import {
   clampTerminalFontSize,
@@ -290,7 +290,9 @@ export function App() {
 
   async function chooseProject() {
     setError(null);
-    const selected = await openDialog({ directory: true, multiple: false });
+    const selected = canUseNativeOpenDialog()
+      ? await openDialog({ directory: true, multiple: false })
+      : window.prompt("输入服务器上的项目目录路径");
     if (!selected || Array.isArray(selected)) return;
 
     const updated = await invoke<WorkbenchState>("upsert_project", { path: selected });
