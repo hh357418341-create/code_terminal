@@ -1,6 +1,6 @@
-import { PanelTop, Plus, RotateCcw, Square, SquareStack, X } from "lucide-react";
+import { MessageSquareText, PanelTop, Plus, RotateCcw, SendHorizontal, Square, SquareStack, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import {
   TerminalSessionView,
   type TerminalSessionHandle,
@@ -368,6 +368,7 @@ export function TerminalPane({
   const tileDragRef = useRef<TerminalTileDragState | null>(null);
   const lastRoutedCommandIdRef = useRef<number | null>(null);
   const previousProjectIdRef = useRef(activeProjectId);
+  const dialogInputRef = useRef<HTMLTextAreaElement | null>(null);
   const [terminalTabs, setTerminalTabs] = useState<TerminalTabsState>(() =>
     createInitialTabs({ id: activeProjectId, name: activeProjectName, path: activeProjectPath }),
   );
@@ -386,6 +387,8 @@ export function TerminalPane({
     tabId: string;
     request: TerminalCommandRequest;
   } | null>(null);
+  const [dialogInputOpen, setDialogInputOpen] = useState(false);
+  const [dialogInputValue, setDialogInputValue] = useState("");
   const activeProjectBinding = useMemo(
     () => ({
       id: activeProjectId || null,
@@ -414,6 +417,42 @@ export function TerminalPane({
   function updateLayoutPreferences(nextPreferences: TerminalLayoutPreferences) {
     setLayoutPreferences(nextPreferences);
     window.setTimeout(() => terminalHandlesRef.current[terminalTabs.activeTabId]?.focus(), 0);
+  }
+
+  function openDialogInput() {
+    setDialogInputOpen(true);
+    window.requestAnimationFrame(() => {
+      dialogInputRef.current?.focus();
+      dialogInputRef.current?.select();
+    });
+  }
+
+  function closeDialogInput() {
+    setDialogInputOpen(false);
+    window.setTimeout(() => terminalHandlesRef.current[terminalTabs.activeTabId]?.focus(), 0);
+  }
+
+  function submitDialogInput() {
+    const value = dialogInputValue.trimEnd();
+    if (!value) return;
+
+    terminalHandlesRef.current[terminalTabs.activeTabId]?.sendDialogInput(value);
+    setDialogInputValue("");
+    setDialogInputOpen(false);
+    window.setTimeout(() => terminalHandlesRef.current[terminalTabs.activeTabId]?.focus(), 0);
+  }
+
+  function handleDialogInputKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeDialogInput();
+      return;
+    }
+
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      submitDialogInput();
+    }
   }
 
   function fitVisibleTerminals() {
@@ -654,12 +693,19 @@ export function TerminalPane({
     if (!drag.dragging && Math.max(deltaX, deltaY) < tileDragActivationDistance) return;
 
     const target = getDockTarget(event.clientX, event.clientY, drag.tabId);
+    const nextDragging = true;
+    if (drag.dragging && drag.target?.tabId === target?.tabId && drag.target?.zone === target?.zone) {
+      return;
+    }
+
     tileDragRef.current = {
       ...drag,
-      dragging: true,
+      dragging: nextDragging,
       target,
     };
-    setIsDraggingTile(true);
+    if (!drag.dragging) {
+      setIsDraggingTile(true);
+    }
     setDockTarget(target);
   }
 
@@ -884,6 +930,14 @@ export function TerminalPane({
         </div>
 
         <div className="terminal-actions">
+          <button
+            className={`terminal-action dialog-input-toggle ${dialogInputOpen ? "active" : ""}`}
+            title="对话输入"
+            onClick={dialogInputOpen ? closeDialogInput : openDialogInput}
+          >
+            <MessageSquareText size={14} />
+            输入
+          </button>
           <div className="terminal-layout-switch" aria-label="终端显示方式">
             <button
               className={`terminal-layout-button ${layoutPreferences.displayMode === "tabs" ? "active" : ""}`}
@@ -923,6 +977,45 @@ export function TerminalPane({
         </div>
       </header>
 
+      {dialogInputOpen && (
+        <div
+          className="dialog-input-popover"
+          role="dialog"
+          aria-label="对话输入"
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <div className="dialog-input-head">
+            <strong>对话输入</strong>
+            <button className="dialog-input-icon" title="关闭" onClick={closeDialogInput}>
+              <X size={14} />
+            </button>
+          </div>
+          <textarea
+            ref={dialogInputRef}
+            className="dialog-input-textarea"
+            aria-label="输入内容"
+            placeholder="输入内容"
+            rows={5}
+            value={dialogInputValue}
+            onChange={(event) => setDialogInputValue(event.target.value)}
+            onKeyDown={handleDialogInputKeyDown}
+          />
+          <div className="dialog-input-actions">
+            <button className="dialog-input-button" onClick={closeDialogInput}>
+              取消
+            </button>
+            <button
+              className="dialog-input-button primary"
+              disabled={!dialogInputValue.trim()}
+              onClick={submitDialogInput}
+            >
+              <SendHorizontal size={14} />
+              发送
+            </button>
+          </div>
+        </div>
+      )}
+
       <div
         className={`terminal-surface ${isResizingLayout ? "resizing" : ""} ${isDraggingTile ? "tile-dragging" : ""}`}
         ref={terminalSurfaceRef}
@@ -953,6 +1046,7 @@ export function TerminalPane({
               <div
                 className="terminal-cell-header"
                 title="拖动调整瓦片位置"
+                onMouseDown={(event) => event.stopPropagation()}
                 onPointerCancel={finishTileDrag}
                 onPointerDown={(event) => startTileDrag(tab.id, event)}
                 onPointerMove={updateTileDrag}

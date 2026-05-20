@@ -50,6 +50,10 @@ input {
   font: inherit;
 }
 
+textarea {
+  font: inherit;
+}
+
 .shell {
   display: grid;
   grid-template-columns: var(--sidebar-width, 292px) minmax(0, 1fr);
@@ -756,6 +760,7 @@ input {
 
 .terminal-pane {
   display: grid;
+  position: relative;
   grid-template-rows: 46px minmax(0, 1fr);
   flex: 1;
   min-width: 0;
@@ -964,9 +969,123 @@ input {
   background: color-mix(in srgb, var(--terminal-fg, #d8e1e8) 14%, transparent);
 }
 
+.terminal-action.active {
+  color: color-mix(in srgb, var(--terminal-bg, #101820) 82%, #000000);
+  background: var(--terminal-accent, #8ab4ff);
+}
+
 .terminal-action:disabled {
   cursor: not-allowed;
   opacity: 0.44;
+}
+
+.dialog-input-popover {
+  position: absolute;
+  top: 54px;
+  right: 18px;
+  z-index: 60;
+  display: grid;
+  gap: 10px;
+  width: min(420px, calc(100% - 36px));
+  padding: 12px;
+  color: var(--terminal-fg, #d8e1e8);
+  background: color-mix(in srgb, var(--terminal-panel, #0c1118) 94%, var(--terminal-bg, #070b10));
+  border: 1px solid color-mix(in srgb, var(--terminal-accent, #8ab4ff) 28%, var(--terminal-border, #1a2433));
+  border-radius: 8px;
+  box-shadow: 0 20px 48px color-mix(in srgb, var(--terminal-bg, #070b10) 68%, transparent);
+}
+
+.dialog-input-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 24px;
+}
+
+.dialog-input-head strong {
+  color: var(--terminal-fg, #d8e1e8);
+  font-size: 12px;
+  font-weight: 760;
+  line-height: 1;
+}
+
+.dialog-input-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  color: var(--terminal-muted, #93a2ae);
+  background: transparent;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.dialog-input-icon:hover {
+  color: var(--terminal-fg, #d8e1e8);
+  background: color-mix(in srgb, var(--terminal-fg, #d8e1e8) 12%, transparent);
+}
+
+.dialog-input-textarea {
+  width: 100%;
+  min-height: 118px;
+  max-height: 260px;
+  resize: vertical;
+  padding: 10px 11px;
+  color: var(--terminal-fg, #d8e1e8);
+  background: color-mix(in srgb, var(--terminal-bg, #070b10) 82%, transparent);
+  border: 1px solid color-mix(in srgb, var(--terminal-border, #24313a) 78%, transparent);
+  border-radius: 8px;
+  font-family: "Cascadia Mono", "Cascadia Code", "JetBrains Mono", Consolas, "SFMono-Regular", monospace;
+  font-size: 13px;
+  line-height: 1.45;
+  outline: none;
+}
+
+.dialog-input-textarea:focus {
+  border-color: color-mix(in srgb, var(--terminal-accent, #8ab4ff) 64%, var(--terminal-border, #24313a));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--terminal-accent, #8ab4ff) 16%, transparent);
+}
+
+.dialog-input-textarea::placeholder {
+  color: color-mix(in srgb, var(--terminal-muted, #93a2ae) 72%, transparent);
+}
+
+.dialog-input-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.dialog-input-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 11px;
+  color: var(--terminal-fg, #d8e1e8);
+  background: color-mix(in srgb, var(--terminal-fg, #d8e1e8) 9%, transparent);
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 680;
+  line-height: 1;
+}
+
+.dialog-input-button:hover {
+  background: color-mix(in srgb, var(--terminal-fg, #d8e1e8) 14%, transparent);
+}
+
+.dialog-input-button.primary {
+  color: color-mix(in srgb, var(--terminal-bg, #101820) 82%, #000000);
+  background: var(--terminal-accent, #8ab4ff);
+}
+
+.dialog-input-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .terminal-surface {
@@ -987,6 +1106,10 @@ input {
 .terminal-surface.tile-dragging {
   cursor: grabbing;
   user-select: none;
+}
+
+.terminal-surface.tile-dragging .terminal-cell {
+  transition: none;
 }
 
 .terminal-resize-handle {
@@ -1108,7 +1231,11 @@ input {
 }
 
 .terminal-cell.dragging {
-  opacity: 0.62;
+  border-color: color-mix(in srgb, var(--terminal-accent, #8ab4ff) 52%, var(--terminal-border, #1a2433));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 8%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--terminal-accent, #8ab4ff) 12%, transparent),
+    0 14px 32px color-mix(in srgb, var(--terminal-bg, #070b10) 48%, transparent);
 }
 
 .terminal-cell.dock-target {
