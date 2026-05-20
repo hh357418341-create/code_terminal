@@ -761,7 +761,7 @@ textarea {
 .terminal-pane {
   display: grid;
   position: relative;
-  grid-template-rows: 46px minmax(0, 1fr);
+  grid-template-rows: 46px minmax(0, 1fr) auto;
   flex: 1;
   min-width: 0;
   min-height: 0;
@@ -969,123 +969,9 @@ textarea {
   background: color-mix(in srgb, var(--terminal-fg, #d8e1e8) 14%, transparent);
 }
 
-.terminal-action.active {
-  color: color-mix(in srgb, var(--terminal-bg, #101820) 82%, #000000);
-  background: var(--terminal-accent, #8ab4ff);
-}
-
 .terminal-action:disabled {
   cursor: not-allowed;
   opacity: 0.44;
-}
-
-.dialog-input-popover {
-  position: absolute;
-  top: 54px;
-  right: 18px;
-  z-index: 60;
-  display: grid;
-  gap: 10px;
-  width: min(420px, calc(100% - 36px));
-  padding: 12px;
-  color: var(--terminal-fg, #d8e1e8);
-  background: color-mix(in srgb, var(--terminal-panel, #0c1118) 94%, var(--terminal-bg, #070b10));
-  border: 1px solid color-mix(in srgb, var(--terminal-accent, #8ab4ff) 28%, var(--terminal-border, #1a2433));
-  border-radius: 8px;
-  box-shadow: 0 20px 48px color-mix(in srgb, var(--terminal-bg, #070b10) 68%, transparent);
-}
-
-.dialog-input-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  min-height: 24px;
-}
-
-.dialog-input-head strong {
-  color: var(--terminal-fg, #d8e1e8);
-  font-size: 12px;
-  font-weight: 760;
-  line-height: 1;
-}
-
-.dialog-input-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  color: var(--terminal-muted, #93a2ae);
-  background: transparent;
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.dialog-input-icon:hover {
-  color: var(--terminal-fg, #d8e1e8);
-  background: color-mix(in srgb, var(--terminal-fg, #d8e1e8) 12%, transparent);
-}
-
-.dialog-input-textarea {
-  width: 100%;
-  min-height: 118px;
-  max-height: 260px;
-  resize: vertical;
-  padding: 10px 11px;
-  color: var(--terminal-fg, #d8e1e8);
-  background: color-mix(in srgb, var(--terminal-bg, #070b10) 82%, transparent);
-  border: 1px solid color-mix(in srgb, var(--terminal-border, #24313a) 78%, transparent);
-  border-radius: 8px;
-  font-family: "Cascadia Mono", "Cascadia Code", "JetBrains Mono", Consolas, "SFMono-Regular", monospace;
-  font-size: 13px;
-  line-height: 1.45;
-  outline: none;
-}
-
-.dialog-input-textarea:focus {
-  border-color: color-mix(in srgb, var(--terminal-accent, #8ab4ff) 64%, var(--terminal-border, #24313a));
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--terminal-accent, #8ab4ff) 16%, transparent);
-}
-
-.dialog-input-textarea::placeholder {
-  color: color-mix(in srgb, var(--terminal-muted, #93a2ae) 72%, transparent);
-}
-
-.dialog-input-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
-.dialog-input-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-height: 30px;
-  padding: 0 11px;
-  color: var(--terminal-fg, #d8e1e8);
-  background: color-mix(in srgb, var(--terminal-fg, #d8e1e8) 9%, transparent);
-  border-radius: 7px;
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 680;
-  line-height: 1;
-}
-
-.dialog-input-button:hover {
-  background: color-mix(in srgb, var(--terminal-fg, #d8e1e8) 14%, transparent);
-}
-
-.dialog-input-button.primary {
-  color: color-mix(in srgb, var(--terminal-bg, #101820) 82%, #000000);
-  background: var(--terminal-accent, #8ab4ff);
-}
-
-.dialog-input-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
 }
 
 .terminal-surface {
@@ -1097,6 +983,77 @@ textarea {
   overflow: hidden;
   padding: 14px 18px 18px;
   background: transparent;
+}
+
+.terminal-composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 42px;
+  align-items: end;
+  gap: 10px;
+  min-width: 0;
+  padding: 0 18px 16px;
+  background:
+    linear-gradient(
+      180deg,
+      transparent,
+      color-mix(in srgb, var(--terminal-bg, #070b10) 88%, transparent) 24%
+    );
+}
+
+.terminal-composer-input {
+  width: 100%;
+  min-height: 58px;
+  max-height: 150px;
+  resize: vertical;
+  padding: 12px 13px;
+  color: var(--terminal-fg, #d8e1e8);
+  background: color-mix(in srgb, var(--terminal-panel, #0c1118) 78%, var(--terminal-bg, #070b10));
+  border: 1px solid color-mix(in srgb, var(--terminal-border, #24313a) 78%, transparent);
+  border-radius: 8px;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 5%, transparent),
+    0 12px 28px color-mix(in srgb, var(--terminal-bg, #070b10) 38%, transparent);
+  font-family: "Cascadia Mono", "Cascadia Code", "JetBrains Mono", Consolas, "SFMono-Regular", monospace;
+  font-size: 13px;
+  line-height: 1.45;
+  outline: none;
+}
+
+.terminal-composer-input:focus {
+  border-color: color-mix(in srgb, var(--terminal-accent, #8ab4ff) 64%, var(--terminal-border, #24313a));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 6%, transparent),
+    0 0 0 3px color-mix(in srgb, var(--terminal-accent, #8ab4ff) 16%, transparent),
+    0 12px 28px color-mix(in srgb, var(--terminal-bg, #070b10) 38%, transparent);
+}
+
+.terminal-composer-input::placeholder {
+  color: color-mix(in srgb, var(--terminal-muted, #93a2ae) 78%, transparent);
+}
+
+.terminal-composer-send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  margin-bottom: 8px;
+  color: color-mix(in srgb, var(--terminal-bg, #101820) 82%, #000000);
+  background: var(--terminal-accent, #8ab4ff);
+  border: 1px solid color-mix(in srgb, var(--terminal-accent, #8ab4ff) 82%, #ffffff);
+  border-radius: 8px;
+  box-shadow: 0 12px 24px color-mix(in srgb, var(--terminal-bg, #070b10) 42%, transparent);
+  cursor: pointer;
+}
+
+.terminal-composer-send:hover {
+  filter: brightness(1.05);
+}
+
+.terminal-composer-send:disabled {
+  cursor: not-allowed;
+  filter: none;
+  opacity: 0.45;
 }
 
 .terminal-surface.resizing {
@@ -1567,7 +1524,7 @@ textarea {
   }
 
   .terminal-pane {
-    grid-template-rows: 38px minmax(0, 1fr);
+    grid-template-rows: 38px minmax(0, 1fr) auto;
   }
 
   .terminal-surface {
@@ -1598,5 +1555,21 @@ textarea {
 
   .terminal-host .xterm {
     padding: 8px 10px;
+  }
+
+  .terminal-composer {
+    padding: 0 14px 12px;
+  }
+
+  .terminal-composer-input {
+    min-height: 46px;
+    padding: 9px 10px;
+    font-size: 12px;
+  }
+
+  .terminal-composer-send {
+    width: 38px;
+    height: 38px;
+    margin-bottom: 4px;
   }
 }

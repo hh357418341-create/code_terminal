@@ -1,4 +1,4 @@
-import { MessageSquareText, PanelTop, Plus, RotateCcw, SendHorizontal, Square, SquareStack, X } from "lucide-react";
+import { PanelTop, Plus, RotateCcw, SendHorizontal, Square, SquareStack, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import {
@@ -368,7 +368,7 @@ export function TerminalPane({
   const tileDragRef = useRef<TerminalTileDragState | null>(null);
   const lastRoutedCommandIdRef = useRef<number | null>(null);
   const previousProjectIdRef = useRef(activeProjectId);
-  const dialogInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
   const [terminalTabs, setTerminalTabs] = useState<TerminalTabsState>(() =>
     createInitialTabs({ id: activeProjectId, name: activeProjectName, path: activeProjectPath }),
   );
@@ -387,8 +387,7 @@ export function TerminalPane({
     tabId: string;
     request: TerminalCommandRequest;
   } | null>(null);
-  const [dialogInputOpen, setDialogInputOpen] = useState(false);
-  const [dialogInputValue, setDialogInputValue] = useState("");
+  const [composerInputValue, setComposerInputValue] = useState("");
   const activeProjectBinding = useMemo(
     () => ({
       id: activeProjectId || null,
@@ -416,42 +415,32 @@ export function TerminalPane({
 
   function updateLayoutPreferences(nextPreferences: TerminalLayoutPreferences) {
     setLayoutPreferences(nextPreferences);
-    window.setTimeout(() => terminalHandlesRef.current[terminalTabs.activeTabId]?.focus(), 0);
+    focusComposer();
   }
 
-  function openDialogInput() {
-    setDialogInputOpen(true);
-    window.requestAnimationFrame(() => {
-      dialogInputRef.current?.focus();
-      dialogInputRef.current?.select();
-    });
+  function focusComposer() {
+    window.setTimeout(() => composerInputRef.current?.focus(), 0);
   }
 
-  function closeDialogInput() {
-    setDialogInputOpen(false);
-    window.setTimeout(() => terminalHandlesRef.current[terminalTabs.activeTabId]?.focus(), 0);
-  }
-
-  function submitDialogInput() {
-    const value = dialogInputValue.trimEnd();
+  function submitComposerInput() {
+    const value = composerInputValue.trimEnd();
     if (!value) return;
 
     terminalHandlesRef.current[terminalTabs.activeTabId]?.sendDialogInput(value);
-    setDialogInputValue("");
-    setDialogInputOpen(false);
-    window.setTimeout(() => terminalHandlesRef.current[terminalTabs.activeTabId]?.focus(), 0);
+    setComposerInputValue("");
+    focusComposer();
   }
 
-  function handleDialogInputKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
+  function handleComposerInputKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Escape") {
       event.preventDefault();
-      closeDialogInput();
+      setComposerInputValue("");
       return;
     }
 
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      submitDialogInput();
+      submitComposerInput();
     }
   }
 
@@ -796,6 +785,7 @@ export function TerminalPane({
       inline: "nearest",
       behavior: "smooth",
     });
+    focusComposer();
   }, [terminalTabs.activeTabId, terminalTabs.tabs.length]);
 
   useEffect(() => {
@@ -818,6 +808,7 @@ export function TerminalPane({
       tabs: [...current.tabs, tab],
       activeTabId: tab.id,
     }));
+    focusComposer();
   }
 
   function closeTerminalTab(tabId: string) {
@@ -864,7 +855,7 @@ export function TerminalPane({
     if (tab?.projectId && tab.projectId !== activeProjectId) {
       onProjectFocus?.(tab.projectId);
     }
-    window.setTimeout(() => terminalHandlesRef.current[tabId]?.focus(), 0);
+    focusComposer();
   }
 
   return (
@@ -930,14 +921,6 @@ export function TerminalPane({
         </div>
 
         <div className="terminal-actions">
-          <button
-            className={`terminal-action dialog-input-toggle ${dialogInputOpen ? "active" : ""}`}
-            title="对话输入"
-            onClick={dialogInputOpen ? closeDialogInput : openDialogInput}
-          >
-            <MessageSquareText size={14} />
-            输入
-          </button>
           <div className="terminal-layout-switch" aria-label="终端显示方式">
             <button
               className={`terminal-layout-button ${layoutPreferences.displayMode === "tabs" ? "active" : ""}`}
@@ -976,45 +959,6 @@ export function TerminalPane({
           </button>
         </div>
       </header>
-
-      {dialogInputOpen && (
-        <div
-          className="dialog-input-popover"
-          role="dialog"
-          aria-label="对话输入"
-          onPointerDown={(event) => event.stopPropagation()}
-        >
-          <div className="dialog-input-head">
-            <strong>对话输入</strong>
-            <button className="dialog-input-icon" title="关闭" onClick={closeDialogInput}>
-              <X size={14} />
-            </button>
-          </div>
-          <textarea
-            ref={dialogInputRef}
-            className="dialog-input-textarea"
-            aria-label="输入内容"
-            placeholder="输入内容"
-            rows={5}
-            value={dialogInputValue}
-            onChange={(event) => setDialogInputValue(event.target.value)}
-            onKeyDown={handleDialogInputKeyDown}
-          />
-          <div className="dialog-input-actions">
-            <button className="dialog-input-button" onClick={closeDialogInput}>
-              取消
-            </button>
-            <button
-              className="dialog-input-button primary"
-              disabled={!dialogInputValue.trim()}
-              onClick={submitDialogInput}
-            >
-              <SendHorizontal size={14} />
-              发送
-            </button>
-          </div>
-        </div>
-      )}
 
       <div
         className={`terminal-surface ${isResizingLayout ? "resizing" : ""} ${isDraggingTile ? "tile-dragging" : ""}`}
@@ -1145,6 +1089,34 @@ export function TerminalPane({
             />
           ))}
       </div>
+
+      <form
+        className="terminal-composer"
+        aria-label="对话输入"
+        onSubmit={(event) => {
+          event.preventDefault();
+          submitComposerInput();
+        }}
+      >
+        <textarea
+          ref={composerInputRef}
+          className="terminal-composer-input"
+          aria-label="输入内容"
+          placeholder="输入给当前会话"
+          rows={2}
+          value={composerInputValue}
+          onChange={(event) => setComposerInputValue(event.target.value)}
+          onKeyDown={handleComposerInputKeyDown}
+        />
+        <button
+          className="terminal-composer-send"
+          disabled={!composerInputValue.trim()}
+          title="发送"
+          type="submit"
+        >
+          <SendHorizontal size={16} />
+        </button>
+      </form>
     </section>
   );
 }

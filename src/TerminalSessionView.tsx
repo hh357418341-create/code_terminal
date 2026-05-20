@@ -23,18 +23,6 @@ interface SavedPastedImage {
   path: string;
 }
 
-interface EditableSelectionRange {
-  startX: number;
-  startY: number;
-  endX: number;
-  endY: number;
-}
-
-interface EditableCursorPosition {
-  x: number;
-  y: number;
-}
-
 export interface TerminalSessionRuntime {
   session: TerminalStarted | null;
   isStarting: boolean;
@@ -245,249 +233,6 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       );
     }
 
-    function isDeletionShortcut(event: KeyboardEvent) {
-      return (
-        event.type === "keydown" &&
-        !event.ctrlKey &&
-        !event.altKey &&
-        !event.metaKey &&
-        (event.key === "Backspace" || event.key === "Delete")
-      );
-    }
-
-    function orderedSelectionRange(range: EditableSelectionRange): EditableSelectionRange {
-      const isReversed =
-        range.startY > range.endY ||
-        (range.startY === range.endY && range.startX > range.endX);
-
-      if (!isReversed) return range;
-
-      return {
-        startX: range.endX,
-        startY: range.endY,
-        endX: range.startX,
-        endY: range.startY,
-      };
-    }
-
-    function getEditableSelectionRange(terminal: XTerm) {
-      const rawRange = terminal.getSelectionPosition();
-      const buffer = terminal.buffer.active;
-      if (!rawRange || buffer.type !== "normal") return null;
-
-      const cursorRow = buffer.baseY + buffer.cursorY;
-      const range = orderedSelectionRange({
-        startX: rawRange.start.x,
-        startY: rawRange.start.y,
-        endX: rawRange.end.x,
-        endY: rawRange.end.y,
-      });
-
-      if (
-        range.startY === cursorRow &&
-        range.endY === cursorRow &&
-        range.startX >= 0 &&
-        range.endX > range.startX &&
-        range.endX <= terminal.cols &&
-        range.startY >= 0 &&
-        range.startY < buffer.length
-      ) {
-        return range;
-      }
-
-      return null;
-    }
-
-    function countLineCharacters(terminal: XTerm, row: number, startX: number, endX: number) {
-      const buffer = terminal.buffer.active;
-      const line = buffer.getLine(row);
-      if (!line) return 0;
-
-      const reusableCell = buffer.getNullCell();
-      let count = 0;
-      for (let column = startX; column < endX; column += 1) {
-        const cell = line.getCell(column, reusableCell);
-        if (cell && cell.getWidth() > 0 && cell.getChars()) {
-          count += 1;
-        }
-      }
-
-      return count;
-    }
-
-    function compareEditableCursorPosition(left: EditableCursorPosition, right: EditableCursorPosition) {
-      if (left.y !== right.y) return left.y - right.y;
-      return left.x - right.x;
-    }
-
-    function getEditableCursorLineRange(terminal: XTerm) {
-      const buffer = terminal.buffer.active;
-      const cursorRow = buffer.baseY + buffer.cursorY;
-      let startY = cursorRow;
-      let endY = cursorRow;
-
-      while (startY > 0 && buffer.getLine(startY)?.isWrapped) {
-        startY -= 1;
-      }
-      while (endY + 1 < buffer.length && buffer.getLine(endY + 1)?.isWrapped) {
-        endY += 1;
-      }
-
-      return { startY, endY };
-    }
-
-    function countCharactersBetween(
-      terminal: XTerm,
-      start: EditableCursorPosition,
-      end: EditableCursorPosition,
-    ) {
-      let count = 0;
-      for (let row = start.y; row <= end.y; row += 1) {
-        const startX = row === start.y ? start.x : 0;
-        const endX = row === end.y ? end.x : terminal.cols;
-        count += countLineCharacters(terminal, row, startX, endX);
-      }
-
-      return count;
-    }
-
-    function countSelectedCharacters(terminal: XTerm, range: EditableSelectionRange) {
-      const count = countLineCharacters(terminal, range.startY, range.startX, range.endX);
-      return count || Array.from(terminal.getSelection().replace(/\r?\n/g, "")).length;
-    }
-
-    function repeatSequence(sequence: string, count: number) {
-      return count > 0 ? sequence.repeat(count) : "";
-    }
-
-    function deleteEditableSelection(terminal: XTerm) {
-      if (!terminal.hasSelection()) return false;
-
-      const range = getEditableSelectionRange(terminal);
-      if (!range) {
-        terminal.clearSelection();
-        return true;
-      }
-
-      const deleteCount = countSelectedCharacters(terminal, range);
-      if (deleteCount <= 0) {
-        terminal.clearSelection();
-        return true;
-      }
-
-      const cursorX = terminal.buffer.active.cursorX;
-      const moveCount = countLineCharacters(
-        terminal,
-        range.startY,
-        Math.min(cursorX, range.endX),
-        Math.max(cursorX, range.endX),
-      );
-      const moveToSelectionEnd =
-        range.endX < cursorX
-          ? repeatSequence("\x1b[D", moveCount)
-          : repeatSequence("\x1b[C", moveCount);
-
-      terminal.clearSelection();
-      writeRawTerminalInput(`${moveToSelectionEnd}${repeatSequence("\x7f", deleteCount)}`);
-      return true;
-    }
-
-    function getClickedBufferPosition(terminal: XTerm, event: MouseEvent): EditableCursorPosition | null {
-      const screen = hostRef.current?.querySelector<HTMLElement>(".xterm-screen");
-      if (!screen) return null;
-
-      const rect = screen.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0 || terminal.cols <= 0 || terminal.rows <= 0) {
-        return null;
-      }
-
-      const relativeX = event.clientX - rect.left;
-      const relativeY = event.clientY - rect.top;
-      if (relativeX < 0 || relativeX > rect.width || relativeY < 0 || relativeY >= rect.height) {
-        return null;
-      }
-
-      const cellWidth = rect.width / terminal.cols;
-      const cellHeight = rect.height / terminal.rows;
-      if (cellWidth <= 0 || cellHeight <= 0) return null;
-
-      const buffer = terminal.buffer.active;
-      return {
-        x: Math.max(0, Math.min(terminal.cols, Math.round(relativeX / cellWidth))),
-        y: buffer.viewportY + Math.max(0, Math.min(terminal.rows - 1, Math.floor(relativeY / cellHeight))),
-      };
-    }
-
-    function getCursorMoveSequence(terminal: XTerm, direction: "left" | "right") {
-      if (direction === "left") {
-        return terminal.modes.applicationCursorKeysMode ? "\x1bOD" : "\x1b[D";
-      }
-
-      return terminal.modes.applicationCursorKeysMode ? "\x1bOC" : "\x1b[C";
-    }
-
-    function moveInputCursorToClick(event: MouseEvent) {
-      if (
-        event.button !== 0 ||
-        event.detail !== 1 ||
-        event.altKey ||
-        event.ctrlKey ||
-        event.metaKey ||
-        event.shiftKey
-      ) {
-        return;
-      }
-
-      const terminal = terminalRef.current;
-      if (
-        !terminal ||
-        !sessionIdRef.current ||
-        terminal.hasSelection() ||
-        terminal.buffer.active.type !== "normal" ||
-        terminal.modes.mouseTrackingMode !== "none"
-      ) {
-        return;
-      }
-
-      const target = getClickedBufferPosition(terminal, event);
-      if (!target) return;
-
-      const buffer = terminal.buffer.active;
-      const cursor = {
-        x: buffer.cursorX,
-        y: buffer.baseY + buffer.cursorY,
-      };
-      const inputLineRange = getEditableCursorLineRange(terminal);
-      if (target.y < inputLineRange.startY || target.y > inputLineRange.endY) {
-        return;
-      }
-
-      const comparison = compareEditableCursorPosition(target, cursor);
-      if (comparison === 0) return;
-
-      const isMovingLeft = comparison < 0;
-      const moveCount = isMovingLeft
-        ? countCharactersBetween(terminal, target, cursor)
-        : countCharactersBetween(terminal, cursor, target);
-      if (moveCount <= 0) return;
-
-      event.preventDefault();
-      event.stopPropagation();
-      terminal.focus();
-      writeRawTerminalInput(repeatSequence(getCursorMoveSequence(terminal, isMovingLeft ? "left" : "right"), moveCount));
-    }
-
-    function handleSelectionDeleteShortcut(event: KeyboardEvent) {
-      if (!isDeletionShortcut(event)) return false;
-
-      const terminal = terminalRef.current;
-      if (!terminal?.hasSelection()) return false;
-
-      event.preventDefault();
-      event.stopPropagation();
-      return deleteEditableSelection(terminal);
-    }
-
     async function stopSession() {
       const sessionId = sessionIdRef.current;
       startingSessionIdRef.current = null;
@@ -674,7 +419,6 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
 
       if (isActive) {
         scheduleFitAndResize();
-        terminalRef.current?.focus();
       }
     }, [isActive]);
 
@@ -696,6 +440,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         cursorInactiveStyle: "none",
         cursorStyle: "bar",
         cursorWidth: 2,
+        disableStdin: true,
         fontFamily: '"Cascadia Mono", "Cascadia Code", "JetBrains Mono", Consolas, "SFMono-Regular", monospace',
         fontSize: appearance.fontSize,
         lineHeight: appearance.lineHeight,
@@ -723,7 +468,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       });
       terminal.attachCustomKeyEventHandler((event) => {
         if (isPasteShortcut(event)) return false;
-        return !handleSelectionDeleteShortcut(event);
+        return true;
       });
 
       const pasteListener = (event: ClipboardEvent) => {
@@ -739,7 +484,6 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
           .catch(reportTerminalError);
       };
       host.addEventListener("paste", pasteListener, { capture: true });
-      host.addEventListener("click", moveInputCursorToClick);
 
       const resizeObserver = new ResizeObserver(() => {
         scheduleFitAndResize();
@@ -770,7 +514,6 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         document.removeEventListener("fullscreenchange", scheduleFitAndResize);
         window.visualViewport?.removeEventListener("resize", scheduleFitAndResize);
         host.removeEventListener("paste", pasteListener, { capture: true });
-        host.removeEventListener("click", moveInputCursorToClick);
         terminal.attachCustomKeyEventHandler(() => true);
         bufferDisposable.dispose();
         dataDisposable.dispose();
