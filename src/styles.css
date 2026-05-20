@@ -988,11 +988,11 @@ textarea {
 
 .terminal-composer {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 42px;
+  grid-template-columns: minmax(0, 1fr) 44px;
   align-items: end;
-  gap: 10px;
+  gap: 12px;
   min-width: 0;
-  padding: 0 18px 16px;
+  padding: 2px 20px 18px;
   background:
     linear-gradient(
       180deg,
@@ -1004,20 +1004,23 @@ textarea {
 .terminal-composer-input {
   grid-column: 1;
   width: 100%;
-  min-height: 58px;
-  max-height: 150px;
+  min-height: 64px;
+  max-height: 168px;
   resize: vertical;
-  padding: 12px 13px;
+  padding: 14px 15px;
   color: var(--terminal-fg, #d8e1e8);
-  background: color-mix(in srgb, var(--terminal-panel, #0c1118) 78%, var(--terminal-bg, #070b10));
-  border: 1px solid color-mix(in srgb, var(--terminal-border, #24313a) 78%, transparent);
+  background: color-mix(in srgb, var(--terminal-panel, #0c1118) 86%, var(--terminal-bg, #070b10));
+  border: 1px solid color-mix(in srgb, var(--terminal-border, #24313a) 70%, transparent);
   border-radius: 8px;
   box-shadow:
     inset 0 1px 0 color-mix(in srgb, #ffffff 5%, transparent),
-    0 12px 28px color-mix(in srgb, var(--terminal-bg, #070b10) 38%, transparent);
-  font-family: "Cascadia Mono", "Cascadia Code", "JetBrains Mono", Consolas, "SFMono-Regular", monospace;
-  font-size: 13px;
-  line-height: 1.45;
+    0 14px 30px color-mix(in srgb, var(--terminal-bg, #070b10) 34%, transparent);
+  font-family:
+    Inter, "Segoe UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC",
+    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.62;
   outline: none;
 }
 
@@ -1038,9 +1041,9 @@ textarea {
   grid-column: 2;
   align-items: center;
   justify-content: center;
-  width: 42px;
-  height: 42px;
-  margin-bottom: 8px;
+  width: 44px;
+  height: 44px;
+  margin-bottom: 10px;
   color: color-mix(in srgb, var(--terminal-bg, #101820) 82%, #000000);
   background: var(--terminal-accent, #8ab4ff);
   border: 1px solid color-mix(in srgb, var(--terminal-accent, #8ab4ff) 82%, #ffffff);
@@ -1540,16 +1543,16 @@ textarea {
 }
 
 .terminal-dialog-bubble {
-  max-width: min(76%, 860px);
+  max-width: min(72%, 820px);
   min-width: 0;
-  padding: 10px 12px;
+  padding: 12px 15px;
   overflow-wrap: anywhere;
   border-radius: 8px;
   box-shadow: 0 8px 20px color-mix(in srgb, var(--terminal-bg, #070b10) 28%, transparent);
   font-family: inherit;
-  font-size: 13px;
-  font-weight: 520;
-  line-height: 1.55;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.72;
   white-space: pre-wrap;
 }
 
@@ -1567,24 +1570,28 @@ textarea {
 
 .terminal-dialog-row.terminal .terminal-dialog-bubble {
   color: var(--terminal-fg, #d8e1e8);
-  background: color-mix(in srgb, var(--terminal-fg, #d8e1e8) 8%, var(--terminal-panel, #0c1118));
-  border: 1px solid color-mix(in srgb, var(--terminal-border, #1a2433) 74%, transparent);
+  background: color-mix(in srgb, var(--terminal-fg, #d8e1e8) 9%, var(--terminal-panel, #0c1118));
+  border: 1px solid color-mix(in srgb, var(--terminal-border, #1a2433) 66%, transparent);
   border-bottom-left-radius: 3px;
-  font-family: "Cascadia Mono", "Cascadia Code", "JetBrains Mono", Consolas, "SFMono-Regular", monospace;
+  font-family:
+    Inter, "Segoe UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC",
+    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
 .terminal-dialog-row.tui .terminal-dialog-bubble {
-  max-width: min(92%, 1040px);
-  padding: 11px 13px;
+  max-width: min(82%, 900px);
+  padding: 13px 16px;
   background:
     linear-gradient(
       180deg,
       color-mix(in srgb, var(--terminal-fg, #d8e1e8) 10%, var(--terminal-panel, #0c1118)),
       color-mix(in srgb, var(--terminal-fg, #d8e1e8) 6%, var(--terminal-bg, #070b10))
     );
-  border-color: color-mix(in srgb, var(--terminal-accent, #8ab4ff) 28%, var(--terminal-border, #1a2433));
-  font-size: 12px;
-  line-height: 1.45;
+  border-color: color-mix(in srgb, var(--terminal-accent, #8ab4ff) 24%, var(--terminal-border, #1a2433));
+  font-family: "Cascadia Mono", "Cascadia Code", "JetBrains Mono", Consolas, "SFMono-Regular", monospace;
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.68;
 }
 
 .terminal-host {
@@ -1863,23 +1870,23 @@ textarea {
   }
 
   .terminal-composer {
-    grid-template-columns: minmax(0, 1fr) 34px;
+    grid-template-columns: minmax(0, 1fr) 36px;
     gap: 8px;
     padding: 0 12px 8px;
   }
 
   .terminal-composer-input {
-    min-height: 36px;
-    max-height: 86px;
-    padding: 7px 9px;
-    font-size: 12px;
-    line-height: 1.3;
+    min-height: 42px;
+    max-height: 94px;
+    padding: 9px 11px;
+    font-size: 13px;
+    line-height: 1.48;
   }
 
   .terminal-composer-send {
-    width: 34px;
-    height: 34px;
-    margin-bottom: 2px;
+    width: 36px;
+    height: 36px;
+    margin-bottom: 3px;
   }
 }
 
@@ -1914,19 +1921,21 @@ textarea {
   }
 
   .terminal-composer {
-    grid-template-columns: minmax(0, 1fr) 32px;
+    grid-template-columns: minmax(0, 1fr) 34px;
     padding: 0 10px 6px;
   }
 
   .terminal-composer-input {
-    min-height: 32px;
-    max-height: 62px;
-    padding: 6px 8px;
+    min-height: 36px;
+    max-height: 70px;
+    padding: 7px 9px;
+    font-size: 12.5px;
+    line-height: 1.4;
   }
 
   .terminal-composer-send {
-    width: 32px;
-    height: 32px;
+    width: 34px;
+    height: 34px;
     margin-bottom: 0;
   }
 }

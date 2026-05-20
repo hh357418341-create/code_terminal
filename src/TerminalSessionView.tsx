@@ -23,6 +23,7 @@ const conversationOutputMergeWindowMs = 1200;
 const maxConversationMessages = 160;
 const liveTuiSnapshotDebounceMs = 80;
 const maxLiveTuiSnapshotChars = 6000;
+const codexStatusWords = ["Working", "Thinking", "Reading", "Editing", "Running"];
 
 type ConversationRole = "user" | "terminal";
 type ConversationMessageKind = "normal" | "tui";
@@ -161,14 +162,14 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       return (
         hasStandaloneCarriageReturn(value) ||
         /\x1b\[[0-?]*[ -/]*[ABCDHSTfHLsu]/.test(value) ||
-        hasInteractivePrivateModeControl(value) ||
+        hasInteractivePrivateModeEnable(value) ||
         /\x1b[78=>]/.test(value)
       );
     }
 
-    function hasInteractivePrivateModeControl(value: string) {
+    function hasInteractivePrivateModeEnable(value: string) {
       const interactivePrivateModes = new Set(["47", "1000", "1002", "1003", "1005", "1006", "1015", "1047", "1048", "1049"]);
-      const matches = value.matchAll(/\x1b\[\?([0-9;]*)(?:h|l)/g);
+      const matches = value.matchAll(/\x1b\[\?([0-9;]*)h/g);
 
       for (const match of matches) {
         const modes = match[1].split(";").filter(Boolean);
@@ -178,6 +179,14 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       }
 
       return false;
+    }
+
+    function hasAlternateBufferDisable(value: string) {
+      return /\x1b\[\?(?:47|1047|1049)l/.test(value);
+    }
+
+    function hasSnapshotVisibleText(value: string) {
+      return Boolean(stripAnsiSequences(value).trim());
     }
 
     function looksLikeCodexStatusFrame(value: string) {
@@ -238,6 +247,149 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       return value.replace(/\s+/g, " ").trim();
     }
 
+    function isRecentInputSnapshotEchoFragment(line: string, allowShortFragments: boolean) {
+      const normalizedLine = normalizeEchoComparison(line);
+      if (!normalizedLine) return false;
+
+      return recentUserInputsRef.current.some((input) => {
+        const normalizedInput = normalizeEchoComparison(input);
+        if (!normalizedInput) return false;
+        if (normalizedInput === normalizedLine) return true;
+        return allowShortFragments && normalizedLine.length >= 3 && normalizedInput.includes(normalizedLine);
+      });
+    }
+
+    function hasCodexTuiChrome(lines: string[]) {
+      return lines.some((line) => {
+        const normalizedLine = normalizeEchoComparison(line);
+        return (
+          /\besc to interrupt\b/i.test(normalizedLine) ||
+          /\bContext\s+\d+%\s+(?:left|used)\b/i.test(normalizedLine) ||
+          /\bgpt-[\w.-]+/i.test(normalizedLine) ||
+          /[>›]\s*Improve\b/i.test(normalizedLine) ||
+          /@filename/i.test(normalizedLine)
+        );
+      });
+    }
+
+    function getCodexStatusWord(line: string) {
+      const normalizedLine = normalizeEchoComparison(line.replace(/^[•●?]\s*/, ""));
+      if (!normalizedLine) return null;
+
+      for (const statusWord of codexStatusWords) {
+        const normalizedStatusWord = statusWord.toLowerCase();
+        const normalizedCandidate = normalizedLine.toLowerCase();
+        if (
+          normalizedCandidate === normalizedStatusWord ||
+          normalizedStatusWord.startsWith(normalizedCandidate) ||
+          normalizedStatusWord.endsWith(normalizedCandidate)
+        ) {
+          return statusWord;
+        }
+      }
+
+      return null;
+    }
+
+    function getCodexStatusFragmentWord(value: string) {
+      const normalizedValue = normalizeEchoComparison(value.replace(/[•●·?]/g, " "));
+      if (!normalizedValue) return null;
+
+      const fragments = normalizedValue.split(/\s+/);
+      let matchedStatusWord: string | null = null;
+
+      for (const fragment of fragments) {
+        const normalizedFragment = fragment.toLowerCase();
+        const statusWord = codexStatusWords.find((candidate) => {
+          const normalizedCandidate = candidate.toLowerCase();
+          return (
+            normalizedCandidate === normalizedFragment ||
+            normalizedCandidate.startsWith(normalizedFragment) ||
+            normalizedCandidate.endsWith(normalizedFragment)
+          );
+        });
+
+        if (!statusWord) return null;
+        matchedStatusWord = statusWord;
+      }
+
+      return matchedStatusWord;
+    }
+
+    function isCodexTuiNoiseLine(line: string, shouldCleanCodexChrome: boolean) {
+      if (!shouldCleanCodexChrome) return false;
+
+      const text = line.trim();
+      if (!text) return false;
+      if (/^[•●·?\s\d]+$/.test(text)) return true;
+      if (getCodexStatusFragmentWord(text)) return false;
+
+      return false;
+    }
+
+    function cleanCodexTuiChromeLine(line: string, shouldCleanCodexChrome: boolean) {
+      if (!shouldCleanCodexChrome) return line;
+
+      let text = line.trimEnd();
+      text = text.replace(/[>›]\s*Improve.*$/i, "").trimEnd();
+      text = text.replace(/\([^)]*\besc to interrupt\b[^)]*\)/gi, "").trimEnd();
+
+      const statusInFooter = text.match(/\b(Working|Thinking|Reading|Editing|Running)\b\s*$/i);
+      if (/\bContext\s+\d+%\s+(?:left|used)\b/i.test(text)) {
+        return statusInFooter ? statusInFooter[1] : "";
+      }
+
+      if (/^\s*>/.test(text)) return "";
+      if (/\besc to interrupt\b/i.test(text)) return "";
+      if (isCodexTuiNoiseLine(text, shouldCleanCodexChrome)) return "";
+
+      return text;
+    }
+
+    function isCodexTuiChromeLine(line: string) {
+      const text = normalizeEchoComparison(line);
+      if (!text) return false;
+
+      return (
+        /^[>›]/.test(text) ||
+        /\besc to interrupt\b/i.test(text) ||
+        /\bContext\s+\d+%\s+(?:left|used)\b/i.test(text) ||
+        /\bgpt-[\w.-]+/i.test(text) ||
+        /[>›]\s*Improve\b/i.test(text) ||
+        /@filename/i.test(text)
+      );
+    }
+
+    function cleanCodexSnapshotLines(lines: string[], shouldCleanCodexChrome: boolean) {
+      if (!shouldCleanCodexChrome) return lines;
+
+      const contentLines: string[] = [];
+      let lastStatusWord: string | null = null;
+
+      for (const line of lines) {
+        const statusWord = getCodexStatusWord(line) ?? getCodexStatusFragmentWord(line);
+        if (statusWord) {
+          lastStatusWord = statusWord;
+          continue;
+        }
+
+        if (isCodexTuiChromeLine(line) || isCodexTuiNoiseLine(line, true)) {
+          continue;
+        }
+
+        contentLines.push(line);
+      }
+
+      while (contentLines.length > 0 && !contentLines[0].trim()) {
+        contentLines.shift();
+      }
+      while (contentLines.length > 0 && !contentLines[contentLines.length - 1].trim()) {
+        contentLines.pop();
+      }
+
+      return contentLines.length > 0 ? contentLines : lastStatusWord ? [lastStatusWord] : [];
+    }
+
     function dropWrappedEchoPrefix(lines: string[]) {
       const recentInputs = recentUserInputsRef.current
         .map(normalizeEchoComparison)
@@ -270,13 +422,23 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       let lines = value
         .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "")
         .split("\n")
-        .map(stripPromptPrefixForSnapshot)
+        .map(stripPromptPrefixForSnapshot);
+      const shouldCleanCodexChrome = hasCodexTuiChrome(lines);
+
+      lines = lines
+        .map((line) => cleanCodexTuiChromeLine(line, shouldCleanCodexChrome))
         .filter((line) => {
           const trimmedLine = line.trim();
-          return !trimmedLine || !recentUserInputs.has(trimmedLine);
+          return (
+            !trimmedLine ||
+            (!recentUserInputs.has(trimmedLine) &&
+              (getCodexStatusFragmentWord(trimmedLine) ||
+                !isRecentInputSnapshotEchoFragment(line, shouldCleanCodexChrome)))
+          );
         });
 
       lines = dropWrappedEchoPrefix(lines);
+      lines = cleanCodexSnapshotLines(lines, shouldCleanCodexChrome);
 
       while (lines.length > 0 && !lines[0].trim()) {
         lines.shift();
@@ -566,8 +728,12 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     function enqueueTerminalOutput(data: string) {
       if (!data) return;
 
+      const terminal = terminalRef.current;
+      const activeAlternateBuffer = terminal?.buffer.active.type === "alternate";
+      const isAlternateBufferExitOnly =
+        Boolean(activeAlternateBuffer) && hasAlternateBufferDisable(data) && !hasSnapshotVisibleText(data);
       const useLiveTerminalOutput =
-        shouldUseLiveTerminalOutput(data) || terminalRef.current?.buffer.active.type === "alternate";
+        !isAlternateBufferExitOnly && (shouldUseLiveTerminalOutput(data) || activeAlternateBuffer);
 
       if (useLiveTerminalOutput) {
         markLiveTuiSnapshotStart();
