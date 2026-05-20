@@ -1053,12 +1053,6 @@ textarea {
   filter: brightness(1.05);
 }
 
-.terminal-composer-send.interrupt {
-  color: #ffffff;
-  background: #b84b55;
-  border-color: #d46870;
-}
-
 .terminal-composer-send:disabled {
   cursor: not-allowed;
   filter: none;

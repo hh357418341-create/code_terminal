@@ -416,8 +416,6 @@ export function TerminalPane({
 
   const activeRuntime = tabRuntime[terminalTabs.activeTabId];
   const hasComposerText = Boolean(composerInputValue.trim());
-  const canInterruptActiveTerminal = Boolean(activeRuntime?.session);
-  const composerPrimaryAction = hasComposerText ? "send" : "interrupt";
   const visibleTabs = useMemo(() => {
     if (activeLayout.displayMode === "tabs") {
       const activeTab = terminalTabs.tabs.find((tab) => tab.id === terminalTabs.activeTabId);
@@ -457,15 +455,6 @@ export function TerminalPane({
     activeTerminal.sendComposerInput(value);
     setComposerInputValue("");
     focusActiveTerminal();
-  }
-
-  function handleComposerPrimaryAction() {
-    if (hasComposerText) {
-      submitComposerInput();
-      return;
-    }
-
-    interruptActiveTerminal();
   }
 
   function handleComposerInputKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
@@ -1202,7 +1191,7 @@ export function TerminalPane({
         aria-label="对话输入"
         onSubmit={(event) => {
           event.preventDefault();
-          handleComposerPrimaryAction();
+          submitComposerInput();
         }}
       >
         <textarea
@@ -1218,12 +1207,12 @@ export function TerminalPane({
           onPaste={handleComposerPaste}
         />
         <button
-          className={`terminal-composer-send ${composerPrimaryAction}`}
-          disabled={!hasComposerText && !canInterruptActiveTerminal}
-          title={hasComposerText ? "发送" : "中止当前终端"}
+          className="terminal-composer-send"
+          disabled={!hasComposerText}
+          title="发送"
           type="submit"
         >
-          {hasComposerText ? <SendHorizontal size={16} /> : <Ban size={16} />}
+          <SendHorizontal size={16} />
         </button>
       </form>
     </section>
