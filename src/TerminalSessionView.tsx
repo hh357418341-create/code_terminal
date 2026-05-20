@@ -133,6 +133,8 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     const liveTuiOutputQueuedRef = useRef(false);
     const liveTuiSnapshotStartRowRef = useRef<number | null>(null);
     const liveTuiTranscriptRowsRef = useRef<ConversationLine[]>([]);
+    const directTerminalInputDraftRef = useRef("");
+    const directTerminalBracketedPasteRef = useRef(false);
     const codexWelcomeMessageIdRef = useRef<string | null>(null);
     const dialogConversationStartedRef = useRef(false);
     const pendingSubmitTimerRef = useRef<number | null>(null);
@@ -1454,8 +1456,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     }
 
     function markDialogConversationStartedFromTerminalInput(data: string) {
-      const terminal = terminalRef.current;
-      if (dialogConversationStartedRef.current || terminal?.buffer.active.type !== "alternate") return;
+      if (dialogConversationStartedRef.current || !isDirectTerminalConversationInputContext()) return;
 
       const printableInput = data
         .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
@@ -1465,6 +1466,113 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       if (printableInput || /[\r\n]/.test(data)) {
         dialogConversationStartedRef.current = true;
       }
+    }
+
+    function isDirectTerminalConversationInputContext() {
+      return hasLiveTuiSnapshotContext() || codexWelcomeMessageIdRef.current !== null;
+    }
+
+    function getTerminalInputEscapeSequenceLength(value: string, index: number) {
+      if (value[index] !== "\x1b") return 1;
+
+      const next = value[index + 1];
+      if (!next) return 1;
+
+      if (next === "[") {
+        for (let cursor = index + 2; cursor < value.length; cursor += 1) {
+          const code = value.charCodeAt(cursor);
+          if (code >= 0x40 && code <= 0x7e) {
+            return cursor - index + 1;
+          }
+        }
+        return value.length - index;
+      }
+
+      if (next === "O") {
+        return Math.min(3, value.length - index);
+      }
+
+      return 2;
+    }
+
+    function removeLastInputCharacter(value: string) {
+      return Array.from(value).slice(0, -1).join("");
+    }
+
+    function trackDirectTerminalConversationInput(data: string) {
+      if (!isDirectTerminalConversationInputContext()) {
+        directTerminalInputDraftRef.current = "";
+        directTerminalBracketedPasteRef.current = false;
+        return;
+      }
+
+      let draft = directTerminalInputDraftRef.current;
+      let isBracketedPaste = directTerminalBracketedPasteRef.current;
+      const submittedInputs: string[] = [];
+
+      for (let index = 0; index < data.length;) {
+        if (data.startsWith("\x1b[200~", index)) {
+          isBracketedPaste = true;
+          index += "\x1b[200~".length;
+          continue;
+        }
+
+        if (data.startsWith("\x1b[201~", index)) {
+          isBracketedPaste = false;
+          index += "\x1b[201~".length;
+          continue;
+        }
+
+        const character = data[index];
+        if (isBracketedPaste) {
+          draft += character;
+          index += 1;
+          continue;
+        }
+
+        if (character === "\x1b") {
+          index += getTerminalInputEscapeSequenceLength(data, index);
+          continue;
+        }
+
+        if (character === "\r" || character === "\n") {
+          const submittedInput = normalizeInput(draft).trimEnd();
+          if (submittedInput.trim()) {
+            submittedInputs.push(submittedInput);
+          }
+          draft = "";
+          index += character === "\r" && data[index + 1] === "\n" ? 2 : 1;
+          continue;
+        }
+
+        if (character === "\x7f" || character === "\b") {
+          draft = removeLastInputCharacter(draft);
+          index += 1;
+          continue;
+        }
+
+        if (character === "\x03" || character === "\x04" || character === "\x15" || character === "\x18") {
+          draft = "";
+          index += 1;
+          continue;
+        }
+
+        if (character === "\x17") {
+          draft = draft.replace(/\S+\s*$/, "");
+          index += 1;
+          continue;
+        }
+
+        if (character >= " " || character > "\x7f") {
+          draft += character;
+        }
+
+        index += 1;
+      }
+
+      directTerminalInputDraftRef.current = draft;
+      directTerminalBracketedPasteRef.current = isBracketedPaste;
+      submittedInputs.forEach((input) => appendConversationMessage("user", input));
     }
 
     function isPasteShortcut(event: KeyboardEvent) {
@@ -1482,6 +1590,8 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       sessionIdRef.current = null;
       pendingRawInputRef.current = null;
       lastResizeRef.current = null;
+      directTerminalInputDraftRef.current = "";
+      directTerminalBracketedPasteRef.current = false;
       isLifecycleStoppingRef.current = true;
       dialogConversationStartedRef.current = false;
       clearPendingSubmitTimer();
@@ -1718,6 +1828,10 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       const bufferDisposable = terminal.buffer.onBufferChange((buffer) => {
         const isAlternateBuffer = buffer.type === "alternate";
         host.classList.toggle("terminal-tui-active", isAlternateBuffer);
+        if (!isAlternateBuffer) {
+          directTerminalInputDraftRef.current = "";
+          directTerminalBracketedPasteRef.current = false;
+        }
         if (isAlternateBuffer) {
           liveTuiSnapshotStartRowRef.current = 0;
           liveTuiOutputQueuedRef.current = true;
@@ -1728,6 +1842,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       const dataDisposable = terminal.onData((data) => {
         const sessionId = sessionIdRef.current;
         if (!sessionId) return;
+        trackDirectTerminalConversationInput(data);
         markDialogConversationStartedFromTerminalInput(data);
         revealCursorForInput();
         invoke("terminal_write", { sessionId, data }).catch(reportTerminalError);

@@ -489,7 +489,7 @@ export function TerminalPane({
 
     activeTerminal.sendComposerInput(value);
     setComposerInputValue("");
-    focusActiveTerminal();
+    focusComposer();
   }
 
   function sendComposerEnterToTerminal() {
