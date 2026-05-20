@@ -23,6 +23,7 @@ const conversationOutputMergeWindowMs = 1200;
 const maxConversationMessages = 160;
 const liveTuiSnapshotDebounceMs = 80;
 const maxLiveTuiSnapshotChars = 6000;
+const maxLiveTuiTranscriptChars = 32000;
 const bracketedPasteSubmitDelayMs = 180;
 const codexStatusWords = ["Working", "Thinking", "Reading", "Editing", "Running"];
 const terminalViewModeStorageKey = "code-terminal-view-mode";
@@ -131,6 +132,8 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     const liveTuiSnapshotTimerRef = useRef<number | null>(null);
     const liveTuiOutputQueuedRef = useRef(false);
     const liveTuiSnapshotStartRowRef = useRef<number | null>(null);
+    const liveTuiTranscriptRowsRef = useRef<ConversationLine[]>([]);
+    const dialogConversationStartedRef = useRef(false);
     const pendingSubmitTimerRef = useRef<number | null>(null);
     const [session, setSession] = useState<TerminalStarted | null>(null);
     const [isStarting, setIsStarting] = useState(false);
@@ -272,7 +275,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       return (
         /\besc to interrupt\b/i.test(text) ||
         /\bContext\s+\d+%/i.test(text) ||
-        /^[•●]?\s*(Working|Thinking|Reading|Editing|Running)\b/i.test(text)
+        /^[•●◦○]?\s*(Working|Thinking|Reading|Editing|Running)\b/i.test(text)
       );
     }
 
@@ -344,6 +347,11 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       return lines.some((line) => {
         const normalizedLine = normalizeEchoComparison(line);
         return (
+          isCodexTuiWelcomeOrPromptChromeLine(normalizedLine) ||
+          /^╭|^╰|^│/.test(normalizedLine) ||
+          /\bOpenAI Codex\b/i.test(normalizedLine) ||
+          /\b(model|directory|permissions):/i.test(normalizedLine) ||
+          /\bTip:\b/i.test(normalizedLine) ||
           /\besc to interrupt\b/i.test(normalizedLine) ||
           /\bContext\s+\d+%\s+(?:left|used)\b/i.test(normalizedLine) ||
           /\bgpt-[\w.-]+/i.test(normalizedLine) ||
@@ -354,7 +362,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     }
 
     function getCodexStatusWord(line: string) {
-      const normalizedLine = normalizeEchoComparison(line.replace(/^[•●?]\s*/, ""));
+      const normalizedLine = normalizeEchoComparison(line.replace(/^[•●◦○?]\s*/, ""));
       if (!normalizedLine) return null;
 
       for (const statusWord of codexStatusWords) {
@@ -373,7 +381,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     }
 
     function getCodexStatusFragmentWord(value: string) {
-      const normalizedValue = normalizeEchoComparison(value.replace(/[•●·?]/g, " "));
+      const normalizedValue = normalizeEchoComparison(value.replace(/[•●◦○·?]/g, " "));
       if (!normalizedValue) return null;
 
       const fragments = normalizedValue.split(/\s+/);
@@ -402,16 +410,45 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
 
       const text = line.trim();
       if (!text) return false;
-      if (/^[•●·?\s\d]+$/.test(text)) return true;
+      if (/^[•●◦○·?\s\d]+$/.test(text)) return true;
       if (getCodexStatusFragmentWord(text)) return false;
 
       return false;
+    }
+
+    function isCodexTuiWelcomeOrPromptChromeLine(line: string) {
+      const text = normalizeEchoComparison(line);
+      if (!text) return false;
+
+      return (
+        /\bOpenAI Codex\b/i.test(text) ||
+        /\bBuild faster with Codex\b/i.test(text) ||
+        /\bUse \/skills\b/i.test(text) ||
+        /\bUse \/status\b/i.test(text) ||
+        /\bcurrent model,\s*approvals,\s*and token usage\b/i.test(text) ||
+        /\bapprovals,\s*and token usage\b/i.test(text) ||
+        /\bYou can resume a previous conversation\b/i.test(text) ||
+        /^Tip:?\b/i.test(text) ||
+        /^by running\b/i.test(text) ||
+        /^codex resume$/i.test(text) ||
+        /^code$/i.test(text) ||
+        /\bSummarize recent commits\b/i.test(text) ||
+        /\bFind and fix a bug in @filename\b/i.test(text) ||
+        /\bImprove documentation in @filename\b/i.test(text)
+      );
     }
 
     function cleanCodexTuiChromeLine(line: string, shouldCleanCodexChrome: boolean) {
       if (!shouldCleanCodexChrome) return line;
 
       let text = line.trimEnd();
+      if (/^[╭╰─│\s>_OpenAI Codex().v0-9]+$/.test(text)) return "";
+      if (/^\s*│/.test(text)) return "";
+      if (/^\s*╭/.test(text) || /^\s*╰/.test(text)) return "";
+      if (isCodexTuiWelcomeOrPromptChromeLine(text)) return "";
+      if (/\bOpenAI Codex\b/i.test(text)) return "";
+      if (/\b(model|directory|permissions):/i.test(text)) return "";
+      if (/\bTip:\b/i.test(text)) return "";
       text = text.replace(/[>›]\s*Improve.*$/i, "").trimEnd();
       text = text.replace(/\([^)]*\besc to interrupt\b[^)]*\)/gi, "").trimEnd();
 
@@ -423,6 +460,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       if (/^\s*>/.test(text)) return "";
       if (/\besc to interrupt\b/i.test(text)) return "";
       if (isCodexTuiNoiseLine(text, shouldCleanCodexChrome)) return "";
+      text = text.replace(/^\s*[•●◦○]\s+/, "").trimEnd();
 
       return text;
     }
@@ -432,6 +470,11 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       if (!text) return false;
 
       return (
+        isCodexTuiWelcomeOrPromptChromeLine(text) ||
+        /^╭|^╰|^│/.test(text) ||
+        /\bOpenAI Codex\b/i.test(text) ||
+        /\b(model|directory|permissions):/i.test(text) ||
+        /\bTip:\b/i.test(text) ||
         /^[>›]/.test(text) ||
         /\besc to interrupt\b/i.test(text) ||
         /\bContext\s+\d+%\s+(?:left|used)\b/i.test(text) ||
@@ -557,8 +600,117 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       return truncatedRows;
     }
 
+    function truncateLiveTuiTranscriptRows(rows: ConversationLine[]) {
+      let remainingChars = maxLiveTuiTranscriptChars;
+      const truncatedRows: ConversationLine[] = [];
+
+      for (let index = rows.length - 1; index >= 0; index -= 1) {
+        const row = rows[index];
+        const separatorLength = truncatedRows.length > 0 ? 1 : 0;
+        const availableChars = remainingChars - separatorLength;
+        if (availableChars <= 0) break;
+
+        if (row.text.length <= availableChars) {
+          truncatedRows.unshift(row);
+          remainingChars -= row.text.length + separatorLength;
+          continue;
+        }
+
+        const truncatedText = row.text.slice(-availableChars).trimStart();
+        if (truncatedText) {
+          truncatedRows.unshift({ ...row, text: truncatedText });
+        }
+        break;
+      }
+
+      return truncatedRows;
+    }
+
     function buildTextFromRows(rows: ConversationLine[]) {
       return rows.map((row) => row.text).join("\n").replace(/\n{4,}/g, "\n\n\n").trimEnd();
+    }
+
+    function normalizeTranscriptComparison(row: ConversationLine) {
+      return normalizeEchoComparison(row.text);
+    }
+
+    function replaceMatchingTranscriptTail(
+      previousRows: ConversationLine[],
+      nextRows: ConversationLine[],
+      previousNormalized: string[],
+      nextNormalized: string[],
+    ) {
+      const nonEmptyNextRows = nextNormalized.filter(Boolean).length;
+      if (nonEmptyNextRows === 0) return null;
+
+      const minimumMatches = Math.min(2, nonEmptyNextRows);
+      const searchStart = Math.max(0, previousRows.length - nextRows.length - 6);
+      let bestStart = -1;
+      let bestMatches = 0;
+
+      for (let start = previousRows.length - 1; start >= searchStart; start -= 1) {
+        let matches = 0;
+        const comparableRows = Math.min(nextRows.length, previousRows.length - start);
+        for (let index = 0; index < comparableRows; index += 1) {
+          const previousLine = previousNormalized[start + index];
+          const nextLine = nextNormalized[index];
+          if (previousLine && previousLine === nextLine) {
+            matches += 1;
+          }
+        }
+
+        if (matches > bestMatches) {
+          bestStart = start;
+          bestMatches = matches;
+        }
+      }
+
+      const matchedRatio = bestMatches / Math.max(1, Math.min(nonEmptyNextRows, nextRows.length));
+      if (bestStart >= 0 && bestMatches >= minimumMatches && matchedRatio >= 0.45) {
+        return truncateLiveTuiTranscriptRows([...previousRows.slice(0, bestStart), ...nextRows]);
+      }
+
+      return null;
+    }
+
+    function mergeTuiTranscriptRows(previousRows: ConversationLine[], nextRows: ConversationLine[]) {
+      const normalizedNextRows = trimConversationRows(nextRows);
+      if (normalizedNextRows.length === 0) return previousRows;
+      if (previousRows.length === 0) return truncateLiveTuiTranscriptRows(normalizedNextRows);
+
+      const previousNormalized = previousRows.map(normalizeTranscriptComparison);
+      const nextNormalized = normalizedNextRows.map(normalizeTranscriptComparison);
+      const maxOverlap = Math.min(previousRows.length, normalizedNextRows.length);
+
+      for (let overlap = maxOverlap; overlap > 0; overlap -= 1) {
+        let matches = true;
+        let hasTextMatch = false;
+        for (let index = 0; index < overlap; index += 1) {
+          const previousLine = previousNormalized[previousRows.length - overlap + index];
+          const nextLine = nextNormalized[index];
+          if (previousLine !== nextLine) {
+            matches = false;
+            break;
+          }
+          if (previousLine || nextLine) {
+            hasTextMatch = true;
+          }
+        }
+
+        if (matches && hasTextMatch) {
+          return truncateLiveTuiTranscriptRows([...previousRows, ...normalizedNextRows.slice(overlap)]);
+        }
+      }
+
+      const replacedRows = replaceMatchingTranscriptTail(
+        previousRows,
+        normalizedNextRows,
+        previousNormalized,
+        nextNormalized,
+      );
+      if (replacedRows) return replacedRows;
+
+      return truncateLiveTuiTranscriptRows([...previousRows, ...normalizedNextRows]);
     }
 
     function normalizeSnapshotRows(rawRows: ConversationLine[]) {
@@ -735,6 +887,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       liveTuiMessageIdRef.current = null;
       liveTuiOutputQueuedRef.current = false;
       liveTuiSnapshotStartRowRef.current = null;
+      liveTuiTranscriptRowsRef.current = [];
     }
 
     function clearPendingSubmitTimer() {
@@ -756,9 +909,16 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     }
 
     function upsertLiveTuiMessage(rows: ConversationLine[]) {
+      if (!dialogConversationStartedRef.current) return;
+
       const normalizedRows = normalizeSnapshotRows(rows);
-      const normalizedText = buildTextFromRows(normalizedRows);
-      if (!normalizedText.trim()) return;
+      const nextTranscriptRows = compactConversationRows(
+        mergeTuiTranscriptRows(liveTuiTranscriptRowsRef.current, normalizedRows),
+      );
+      const nextTranscriptText = buildTextFromRows(nextTranscriptRows);
+      if (!nextTranscriptText.trim()) return;
+
+      liveTuiTranscriptRowsRef.current = nextTranscriptRows;
 
       const now = Date.now();
       const messageId = liveTuiMessageIdRef.current ?? createConversationId();
@@ -769,9 +929,9 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         if (existingIndex >= 0) {
           const existing = current[existingIndex];
           if (
-            existing.text === normalizedText &&
+            existing.text === nextTranscriptText &&
             existing.kind === "tui" &&
-            areConversationLinesEqual(existing.lines, normalizedRows)
+            areConversationLinesEqual(existing.lines, nextTranscriptRows)
           ) {
             return current;
           }
@@ -780,8 +940,8 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
           nextMessages[existingIndex] = {
             ...existing,
             kind: "tui",
-            text: normalizedText,
-            lines: normalizedRows,
+            text: nextTranscriptText,
+            lines: nextTranscriptRows,
             updatedAt: now,
           };
           return nextMessages;
@@ -791,8 +951,8 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
           id: messageId,
           role: "terminal",
           kind: "tui",
-          text: normalizedText,
-          lines: normalizedRows,
+          text: nextTranscriptText,
+          lines: nextTranscriptRows,
           createdAt: now,
           updatedAt: now,
         };
@@ -877,6 +1037,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       const normalizedText = normalizeInput(text).trim();
       if (!normalizedText) return;
 
+      dialogConversationStartedRef.current = true;
       recentUserInputsRef.current = [...recentUserInputsRef.current, normalizedText].slice(-12);
       pendingEchoInputsRef.current = [...pendingEchoInputsRef.current, normalizedText].slice(-6);
     }
@@ -1004,6 +1165,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
 
       terminal.write(next, () => {
         if (liveTuiOutputQueuedRef.current) {
+          captureLiveTuiSnapshot();
           scheduleLiveTuiSnapshot();
         }
         pumpTerminalOutput();
@@ -1104,6 +1266,20 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       sendRawOrQueueInput(data);
     }
 
+    function markDialogConversationStartedFromTerminalInput(data: string) {
+      const terminal = terminalRef.current;
+      if (dialogConversationStartedRef.current || terminal?.buffer.active.type !== "alternate") return;
+
+      const printableInput = data
+        .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
+        .replace(/\x1b[@-Z\\-_]/g, "")
+        .replace(/[\x00-\x1f\x7f]/g, "")
+        .trim();
+      if (printableInput || /[\r\n]/.test(data)) {
+        dialogConversationStartedRef.current = true;
+      }
+    }
+
     function isPasteShortcut(event: KeyboardEvent) {
       const key = event.key.toLowerCase();
       return (
@@ -1120,6 +1296,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       pendingRawInputRef.current = null;
       lastResizeRef.current = null;
       isLifecycleStoppingRef.current = true;
+      dialogConversationStartedRef.current = false;
       clearPendingSubmitTimer();
       setSession(null);
       clearOutputQueue();
@@ -1364,6 +1541,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       const dataDisposable = terminal.onData((data) => {
         const sessionId = sessionIdRef.current;
         if (!sessionId) return;
+        markDialogConversationStartedFromTerminalInput(data);
         revealCursorForInput();
         invoke("terminal_write", { sessionId, data }).catch(reportTerminalError);
       });
@@ -1403,6 +1581,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       const unlistenExit = listen<TerminalExit>("terminal-exit", (event) => {
         if (event.payload.sessionId !== sessionIdRef.current) return;
         sessionIdRef.current = null;
+        dialogConversationStartedRef.current = false;
         setSession(null);
         appendConversationMessage("terminal", "会话已结束");
       });
@@ -1423,6 +1602,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         unlistenOutput.then((unlisten) => unlisten());
         unlistenExit.then((unlisten) => unlisten());
         isLifecycleStoppingRef.current = true;
+        dialogConversationStartedRef.current = false;
         clearOutputQueue();
         void stopSession();
         terminal.dispose();
@@ -1514,7 +1694,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
             aria-label="对话记录"
           >
             {conversationMessages
-              .filter((message) => viewMode !== "dialog" || message.role === "user")
+              .filter((message) => viewMode !== "dialog" || message.role === "user" || message.kind === "tui")
               .map((message) => (
                 <div className={`terminal-dialog-row ${message.role} ${message.kind ?? "normal"}`} key={message.id}>
                   <div className="terminal-dialog-bubble">{renderConversationText(message)}</div>
