@@ -437,6 +437,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         /^by running\b/i.test(text) ||
         /^codex resume$/i.test(text) ||
         /^code$/i.test(text) ||
+        /^Implement\s+\{feature\}$/i.test(text) ||
         /\bSummarize recent commits\b/i.test(text) ||
         /\bFind and fix a bug in @filename\b/i.test(text) ||
         /\bImprove documentation in @filename\b/i.test(text)
@@ -856,6 +857,56 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       return `${row.role ?? "terminal"}:${normalizeEchoComparison(row.text)}`;
     }
 
+    function removeSnapshotPrefixAlreadyInTranscript(
+      previousRows: ConversationLine[],
+      nextRows: ConversationLine[],
+      previousNormalized: string[],
+      nextNormalized: string[],
+    ) {
+      const normalizedNextRows = trimConversationRows(nextRows);
+      const nonEmptyNextRows = nextNormalized.filter(Boolean).length;
+      if (nonEmptyNextRows === 0 || previousRows.length === 0) return null;
+
+      const searchStart = Math.max(0, previousRows.length - nextRows.length - 12);
+      let bestStart = -1;
+      let bestPrefixLength = 0;
+      let bestMatches = 0;
+
+      for (let start = previousRows.length - 1; start >= searchStart; start -= 1) {
+        const comparableRows = Math.min(nextRows.length, previousRows.length - start);
+        let matches = 0;
+        let prefixLength = 0;
+
+        for (let index = 0; index < comparableRows; index += 1) {
+          const previousLine = previousNormalized[start + index];
+          const nextLine = nextNormalized[index];
+          if (!previousLine && !nextLine) {
+            prefixLength = index + 1;
+            continue;
+          }
+          if (previousLine !== nextLine) {
+            break;
+          }
+
+          matches += 1;
+          prefixLength = index + 1;
+        }
+
+        if (matches > bestMatches || (matches === bestMatches && prefixLength > bestPrefixLength)) {
+          bestStart = start;
+          bestMatches = matches;
+          bestPrefixLength = prefixLength;
+        }
+      }
+
+      const minimumMatches = Math.min(2, nonEmptyNextRows);
+      if (bestStart >= 0 && bestMatches >= minimumMatches && bestPrefixLength < normalizedNextRows.length) {
+        return truncateLiveTuiTranscriptRows([...previousRows, ...normalizedNextRows.slice(bestPrefixLength)]);
+      }
+
+      return null;
+    }
+
     function replaceMatchingTranscriptTail(
       previousRows: ConversationLine[],
       nextRows: ConversationLine[],
@@ -903,6 +954,14 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       const previousNormalized = previousRows.map(normalizeTranscriptComparison);
       const nextNormalized = normalizedNextRows.map(normalizeTranscriptComparison);
       const maxOverlap = Math.min(previousRows.length, normalizedNextRows.length);
+
+      const dedupedRows = removeSnapshotPrefixAlreadyInTranscript(
+        previousRows,
+        normalizedNextRows,
+        previousNormalized,
+        nextNormalized,
+      );
+      if (dedupedRows) return dedupedRows;
 
       for (let overlap = maxOverlap; overlap > 0; overlap -= 1) {
         let matches = true;
