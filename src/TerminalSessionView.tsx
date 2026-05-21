@@ -35,6 +35,7 @@ type TerminalViewMode = "dialog" | "terminal";
 interface ConversationLine {
   text: string;
   muted?: boolean;
+  role?: ConversationRole;
 }
 
 interface TerminalBufferCellSnapshot {
@@ -57,6 +58,7 @@ interface ConversationMessage {
   kind?: ConversationMessageKind;
   text: string;
   lines?: ConversationLine[];
+  tuiGroupId?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -441,10 +443,23 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       );
     }
 
+    function getCodexHistoricalUserLineText(line: string) {
+      const text = line.trimEnd();
+      const match = text.match(/^\s*[>›]\s+(.+)$/);
+      if (!match || /[>›]\s*Improve\b/i.test(text)) return null;
+
+      return match[1].trimEnd();
+    }
+
     function cleanCodexTuiChromeLine(line: string, shouldCleanCodexChrome: boolean) {
       if (!shouldCleanCodexChrome) return line;
 
       let text = line.trimEnd();
+      const historicalUserLineText = getCodexHistoricalUserLineText(text);
+      if (historicalUserLineText !== null) {
+        return historicalUserLineText;
+      }
+
       if (/^[╭╰─│\s>_OpenAI Codex().v0-9]+$/.test(text)) return "";
       if (/^\s*│/.test(text)) return "";
       if (/^\s*╭/.test(text) || /^\s*╰/.test(text)) return "";
@@ -471,6 +486,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     function isCodexTuiChromeLine(line: string) {
       const text = normalizeEchoComparison(line);
       if (!text) return false;
+      if (/^[>›]\s+\S/.test(text) && !/[>›]\s*Improve\b/i.test(text)) return false;
 
       return (
         isCodexTuiWelcomeOrPromptChromeLine(text) ||
@@ -813,8 +829,31 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       return rows.map((row) => row.text).join("\n").replace(/\n{4,}/g, "\n\n\n").trimEnd();
     }
 
+    function splitTuiConversationRows(rows: ConversationLine[]) {
+      const groups: Array<{ role: ConversationRole; lines: ConversationLine[] }> = [];
+
+      for (const row of rows) {
+        const role: ConversationRole = row.role === "user" ? "user" : "terminal";
+        const lastGroup = groups[groups.length - 1];
+        const groupRow = row.role ? { ...row, role: undefined } : row;
+
+        if (lastGroup?.role === role) {
+          lastGroup.lines.push(groupRow);
+        } else {
+          groups.push({ role, lines: [groupRow] });
+        }
+      }
+
+      return groups
+        .map((group) => ({
+          ...group,
+          lines: trimConversationRows(compactConversationRows(group.lines)),
+        }))
+        .filter((group) => buildTextFromRows(group.lines).trim());
+    }
+
     function normalizeTranscriptComparison(row: ConversationLine) {
-      return normalizeEchoComparison(row.text);
+      return `${row.role ?? "terminal"}:${normalizeEchoComparison(row.text)}`;
     }
 
     function replaceMatchingTranscriptTail(
@@ -904,7 +943,10 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       if (!first || !second || first.length !== second.length) return false;
 
       return first.every(
-        (line, index) => line.text === second[index].text && Boolean(line.muted) === Boolean(second[index].muted),
+        (line, index) =>
+          line.text === second[index].text &&
+          Boolean(line.muted) === Boolean(second[index].muted) &&
+          line.role === second[index].role,
       );
     }
 
@@ -968,6 +1010,10 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       rows = rows
         .map((row) => ({
           ...row,
+          role:
+            shouldCleanCodexChrome && getCodexHistoricalUserLineText(row.text) !== null
+              ? ("user" as const)
+              : row.role,
           text: cleanCodexTuiChromeLine(row.text, shouldCleanCodexChrome),
         }))
         .filter((row) => {
@@ -1107,41 +1153,35 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       const now = Date.now();
       const messageId = liveTuiMessageIdRef.current ?? createConversationId();
       liveTuiMessageIdRef.current = messageId;
+      const messageGroups = splitTuiConversationRows(nextTranscriptRows);
 
       setConversationMessages((current) => {
-        const existingIndex = current.findIndex((message) => message.id === messageId);
-        if (existingIndex >= 0) {
-          const existing = current[existingIndex];
-          if (
-            existing.text === nextTranscriptText &&
-            existing.kind === "tui" &&
-            areConversationLinesEqual(existing.lines, nextTranscriptRows)
-          ) {
-            return current;
-          }
+        const firstExistingIndex = current.findIndex((message) => message.tuiGroupId === messageId);
+        const nextGroupedMessages: ConversationMessage[] = messageGroups.map((group, index) => {
+          const existing = current.find(
+            (message) => message.tuiGroupId === messageId && message.id === `${messageId}-${index}`,
+          );
+          const text = buildTextFromRows(group.lines);
 
-          const nextMessages = [...current];
-          nextMessages[existingIndex] = {
-            ...existing,
-            kind: "tui",
-            text: nextTranscriptText,
-            lines: nextTranscriptRows,
+          return {
+            id: `${messageId}-${index}`,
+            role: group.role,
+            kind: group.role === "user" ? "normal" : "tui",
+            text,
+            lines: group.lines,
+            tuiGroupId: messageId,
+            createdAt: existing?.createdAt ?? now,
             updatedAt: now,
           };
-          return nextMessages;
+        });
+
+        if (firstExistingIndex >= 0) {
+          const nextMessages = current.filter((message) => message.tuiGroupId !== messageId);
+          nextMessages.splice(firstExistingIndex, 0, ...nextGroupedMessages);
+          return nextMessages.slice(-maxConversationMessages);
         }
 
-        const nextMessage: ConversationMessage = {
-          id: messageId,
-          role: "terminal",
-          kind: "tui",
-          text: nextTranscriptText,
-          lines: nextTranscriptRows,
-          createdAt: now,
-          updatedAt: now,
-        };
-
-        return [...current, nextMessage].slice(-maxConversationMessages);
+        return [...current, ...nextGroupedMessages].slice(-maxConversationMessages);
       });
     }
 
