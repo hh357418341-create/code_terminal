@@ -126,6 +126,14 @@ function formatRelativeTime(value: number) {
   return `${months} 月`;
 }
 
+function getStableViewportHeight() {
+  const heights = [window.innerHeight, window.visualViewport?.height, document.documentElement.clientHeight]
+    .filter((height): height is number => typeof height === "number" && Number.isFinite(height) && height > 0);
+
+  if (heights.length === 0) return null;
+  return Math.max(320, Math.floor(Math.min(...heights)));
+}
+
 export function App() {
   const [windowProjectId, setWindowProjectId] = useState<string | null>(() => getWindowProjectId());
   const [state, setState] = useState<WorkbenchState>(emptyState);
@@ -237,6 +245,49 @@ export function App() {
       activeProjectId: projectId,
     };
   }
+
+  useEffect(() => {
+    let resizeFrame: number | null = null;
+    const root = document.documentElement;
+    const visualViewport = window.visualViewport;
+
+    const applyViewportHeight = () => {
+      const height = getStableViewportHeight();
+      if (height) {
+        root.style.setProperty("--app-viewport-height", `${height}px`);
+      }
+    };
+
+    const scheduleViewportHeight = () => {
+      if (resizeFrame !== null) {
+        window.cancelAnimationFrame(resizeFrame);
+      }
+
+      resizeFrame = window.requestAnimationFrame(() => {
+        resizeFrame = null;
+        applyViewportHeight();
+      });
+    };
+
+    applyViewportHeight();
+    window.addEventListener("resize", scheduleViewportHeight);
+    window.addEventListener("orientationchange", scheduleViewportHeight);
+    document.addEventListener("fullscreenchange", scheduleViewportHeight);
+    visualViewport?.addEventListener("resize", scheduleViewportHeight);
+    visualViewport?.addEventListener("scroll", scheduleViewportHeight);
+
+    return () => {
+      if (resizeFrame !== null) {
+        window.cancelAnimationFrame(resizeFrame);
+      }
+      window.removeEventListener("resize", scheduleViewportHeight);
+      window.removeEventListener("orientationchange", scheduleViewportHeight);
+      document.removeEventListener("fullscreenchange", scheduleViewportHeight);
+      visualViewport?.removeEventListener("resize", scheduleViewportHeight);
+      visualViewport?.removeEventListener("scroll", scheduleViewportHeight);
+      root.style.removeProperty("--app-viewport-height");
+    };
+  }, []);
 
   useEffect(() => {
     loadState().catch((err) => setError(String(err)));
