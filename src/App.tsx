@@ -137,6 +137,7 @@ function getStableViewportHeight() {
 export function App() {
   const [windowProjectId, setWindowProjectId] = useState<string | null>(() => getWindowProjectId());
   const [state, setState] = useState<WorkbenchState>(emptyState);
+  const [isStateLoaded, setIsStateLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [mobileProjectsOpen, setMobileProjectsOpen] = useState(false);
@@ -291,7 +292,9 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    loadState().catch((err) => setError(String(err)));
+    loadState()
+      .catch((err) => setError(String(err)))
+      .finally(() => setIsStateLoaded(true));
   }, []);
 
   useEffect(() => {
@@ -976,14 +979,16 @@ export function App() {
           </section>
         )}
 
-        <TerminalPane
-          activeProjectId={currentProject?.id || null}
-          activeProjectName={currentProject?.name || null}
-          activeProjectPath={currentProject?.path || null}
-          appearance={terminalAppearance}
-          onError={setError}
-          onProjectFocus={setActive}
-        />
+        {isStateLoaded && (
+          <TerminalPane
+            activeProjectId={currentProject?.id || null}
+            activeProjectName={currentProject?.name || null}
+            activeProjectPath={currentProject?.path || null}
+            appearance={terminalAppearance}
+            onError={setError}
+            onProjectFocus={setActive}
+          />
+        )}
       </section>
     </main>
   );

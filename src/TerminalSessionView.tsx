@@ -199,8 +199,10 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     const terminalRef = useRef<XTerm | null>(null);
     const fitRef = useRef<FitAddon | null>(null);
     const sessionIdRef = useRef<string | null>(null);
+    const activeProjectIdRef = useRef(activeProjectId);
     const conversationLogRef = useRef<HTMLDivElement | null>(null);
     const startingSessionIdRef = useRef<string | null>(null);
+    const pendingStartSessionRef = useRef(false);
     const resizeTimerRef = useRef<number | null>(null);
     const resizeFrameRef = useRef<number | null>(null);
     const resizeSettleTimersRef = useRef<number[]>([]);
@@ -241,6 +243,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         return "terminal";
       }
     });
+    activeProjectIdRef.current = activeProjectId;
 
     function shouldSuppressTerminalError(err: unknown) {
       const message = String(err);
@@ -1808,6 +1811,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       const sessionId = sessionIdRef.current;
       startingSessionIdRef.current = null;
       sessionIdRef.current = null;
+      pendingStartSessionRef.current = false;
       pendingRawInputRef.current = null;
       lastResizeRef.current = null;
       directTerminalInputDraftRef.current = "";
@@ -1905,10 +1909,18 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       }, resizeDebounceMs);
     }
 
-    async function startSession() {
+    async function startSession(options: { restartIfStarting?: boolean } = {}) {
       const terminal = terminalRef.current;
-      if (!terminal || isStartingRef.current) return;
+      if (!terminal) return;
+      if (isStartingRef.current) {
+        if (options.restartIfStarting) {
+          pendingStartSessionRef.current = true;
+          isLifecycleStoppingRef.current = false;
+        }
+        return;
+      }
 
+      pendingStartSessionRef.current = false;
       isStartingRef.current = true;
       isLifecycleStoppingRef.current = false;
       setIsStarting(true);
@@ -1919,21 +1931,30 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       try {
         const size = isVisibleRef.current ? fitTerminal() ?? { cols: 100, rows: 28 } : { cols: 100, rows: 28 };
         const sessionId = createClientId();
+        const requestedProjectId = activeProjectIdRef.current || null;
         startingSessionIdRef.current = sessionId;
         lastResizeRef.current = size;
 
         const started = await invoke<TerminalStarted>("terminal_start", {
           sessionId,
-          projectId: activeProjectId || null,
+          projectId: requestedProjectId,
           cols: size.cols,
           rows: size.rows,
         });
-        if (startingSessionIdRef.current !== started.sessionId || isLifecycleStoppingRef.current) {
+        const projectChangedWhileStarting = (activeProjectIdRef.current || null) !== requestedProjectId;
+        if (
+          startingSessionIdRef.current !== started.sessionId ||
+          isLifecycleStoppingRef.current ||
+          projectChangedWhileStarting
+        ) {
           if (startingSessionIdRef.current === started.sessionId) {
             startingSessionIdRef.current = null;
           }
           lastResizeRef.current = null;
           await invoke("terminal_stop", { sessionId: started.sessionId }).catch(() => undefined);
+          if (projectChangedWhileStarting && !isLifecycleStoppingRef.current) {
+            pendingStartSessionRef.current = true;
+          }
           return;
         }
 
@@ -1959,6 +1980,14 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       } finally {
         isStartingRef.current = false;
         setIsStarting(false);
+        if (
+          pendingStartSessionRef.current &&
+          terminalRef.current &&
+          !isLifecycleStoppingRef.current
+        ) {
+          pendingStartSessionRef.current = false;
+          void startSession(options);
+        }
       }
     }
 
@@ -2111,7 +2140,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         appendConversationMessage("terminal", "会话已结束");
       });
 
-      startSession();
+      startSession({ restartIfStarting: true });
 
       return () => {
         clearScheduledResize();
