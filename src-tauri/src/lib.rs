@@ -1,3 +1,5 @@
+#![cfg(feature = "desktop")]
+
 use portable_pty::{native_pty_system, Child as PtyChild, CommandBuilder, PtySize};
 use serde::{Deserialize, Serialize};
 use std::{
