@@ -1135,7 +1135,7 @@ export function TerminalPane({
             onClick={interruptActiveTerminal}
           >
             <Ban size={14} />
-            中止
+            <span>中止</span>
           </button>
           <button
             className="terminal-action"
@@ -1144,7 +1144,7 @@ export function TerminalPane({
             onClick={restartActiveTerminal}
           >
             <RotateCcw size={14} />
-            重启
+            <span>重启</span>
           </button>
           <button
             className="terminal-action"
@@ -1153,7 +1153,7 @@ export function TerminalPane({
             onClick={stopActiveTerminal}
           >
             <Square size={13} />
-            停止
+            <span>停止</span>
           </button>
         </div>
       </header>
