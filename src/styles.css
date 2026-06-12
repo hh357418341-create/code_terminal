@@ -77,6 +77,10 @@ textarea {
   user-select: none;
 }
 
+.mobile-project-backdrop {
+  display: none;
+}
+
 .sidebar {
   display: flex;
   position: relative;
@@ -507,6 +511,10 @@ textarea {
   align-items: center;
   gap: 13px;
   min-width: 0;
+}
+
+.mobile-project-menu-button {
+  display: none;
 }
 
 .terminal-mark {
@@ -1817,6 +1825,61 @@ textarea {
     display: none;
   }
 
+  .mobile-project-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0 0 0 min(86vw, 340px);
+    z-index: 80;
+    padding: 0;
+    background: color-mix(in srgb, var(--terminal-bg, #070b10) 58%, transparent);
+  }
+
+  .sidebar.mobile-open {
+    display: flex;
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 90;
+    width: min(86vw, 340px);
+    max-width: calc(100vw - 28px);
+    padding: 14px 10px 12px;
+    border-right-color: color-mix(in srgb, var(--terminal-accent, #8ab4ff) 22%, var(--app-border, #d7dee7));
+    box-shadow: 18px 0 42px color-mix(in srgb, #000000 34%, transparent);
+  }
+
+  .sidebar.mobile-open .project-root {
+    min-height: 40px;
+    padding-bottom: 12px;
+  }
+
+  .sidebar.mobile-open .project-list {
+    gap: 5px;
+  }
+
+  .sidebar.mobile-open .project-item {
+    grid-template-columns: 28px minmax(0, 1fr) auto;
+    min-height: 52px;
+    padding: 0 8px;
+  }
+
+  .sidebar.mobile-open .project-drag-handle,
+  .sidebar.mobile-open .project-window-button {
+    display: none;
+  }
+
+  .sidebar.mobile-open .project-path,
+  .sidebar.mobile-open .project-count {
+    display: block;
+  }
+
+  .sidebar.mobile-open .project-select {
+    min-height: 50px;
+  }
+
+  .sidebar.mobile-open .project-time {
+    margin-top: 0;
+    align-self: center;
+  }
+
   .workspace {
     grid-column: 1;
   }
@@ -1840,6 +1903,14 @@ textarea {
 
   .project-heading {
     gap: 8px;
+  }
+
+  .mobile-project-menu-button {
+    display: inline-flex;
+  }
+
+  .desktop-sidebar-open-button {
+    display: none;
   }
 
   .project-heading h2 {

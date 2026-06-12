@@ -139,6 +139,7 @@ export function App() {
   const [state, setState] = useState<WorkbenchState>(emptyState);
   const [error, setError] = useState<string | null>(null);
   const [appearanceOpen, setAppearanceOpen] = useState(false);
+  const [mobileProjectsOpen, setMobileProjectsOpen] = useState(false);
   const [draggedProjectId, setDraggedProjectId] = useState<string | null>(null);
   const [projectDropTarget, setProjectDropTarget] = useState<{
     id: string;
@@ -294,6 +295,19 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    if (!mobileProjectsOpen) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setMobileProjectsOpen(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [mobileProjectsOpen]);
+
+  useEffect(() => {
     cacheTerminalAppearance(terminalAppearance);
   }, [terminalAppearance]);
 
@@ -358,6 +372,7 @@ export function App() {
       setWindowProjectId(updated.activeProjectId);
     }
     setState(windowProjectId ? applyWindowProject(updated, updated.activeProjectId) : updated);
+    setMobileProjectsOpen(false);
   }
 
   async function setActive(projectId: string) {
@@ -368,11 +383,13 @@ export function App() {
         ...current,
         activeProjectId: projectId,
       }));
+      setMobileProjectsOpen(false);
       return;
     }
 
     const updated = await invoke<WorkbenchState>("set_active_project", { projectId });
     setState(updated);
+    setMobileProjectsOpen(false);
   }
 
   function moveProject(
@@ -476,6 +493,15 @@ export function App() {
       ...sidebarLayoutRef.current,
       collapsed,
     });
+  }
+
+  function closeProjectPanel() {
+    if (mobileProjectsOpen) {
+      setMobileProjectsOpen(false);
+      return;
+    }
+
+    setSidebarCollapsed(true);
   }
 
   function startSidebarResize(event: React.PointerEvent<HTMLDivElement>) {
@@ -658,11 +684,20 @@ export function App() {
     <main
       className={`shell ${isSidebarCollapsed ? "sidebar-collapsed" : ""} ${
         isSidebarResizing ? "sidebar-resizing" : ""
-      }`}
+      } ${mobileProjectsOpen ? "mobile-projects-open" : ""}`}
       style={terminalChromeVars}
     >
-      {!isSidebarCollapsed && (
-        <aside className="sidebar">
+      {mobileProjectsOpen && (
+        <button
+          aria-label="关闭项目列表"
+          className="mobile-project-backdrop"
+          type="button"
+          onClick={() => setMobileProjectsOpen(false)}
+        />
+      )}
+
+      {(!isSidebarCollapsed || mobileProjectsOpen) && (
+        <aside className={`sidebar ${mobileProjectsOpen ? "mobile-open" : ""}`} aria-label="项目列表">
           <div className="project-root">
             <div className="project-root-title" title={appHeaderTooltip}>
               <span className="brand-mark">
@@ -676,7 +711,7 @@ export function App() {
             <button className="sidebar-icon" title="打开项目" onClick={chooseProject}>
               <Plus size={16} />
             </button>
-            <button className="sidebar-icon" title="隐藏项目栏" onClick={() => setSidebarCollapsed(true)}>
+            <button className="sidebar-icon" title="隐藏项目栏" onClick={closeProjectPanel}>
               <PanelLeftClose size={16} />
             </button>
           </div>
@@ -771,8 +806,20 @@ export function App() {
       <section className="workspace">
         <header className="workspace-bar">
           <div className="project-heading">
+            <button
+              className="icon-button mobile-project-menu-button"
+              aria-expanded={mobileProjectsOpen}
+              title="切换项目"
+              onClick={() => setMobileProjectsOpen(true)}
+            >
+              <PanelLeftOpen size={16} />
+            </button>
             {isSidebarCollapsed && (
-              <button className="icon-button" title="显示项目栏" onClick={() => setSidebarCollapsed(false)}>
+              <button
+                className="icon-button desktop-sidebar-open-button"
+                title="显示项目栏"
+                onClick={() => setSidebarCollapsed(false)}
+              >
                 <PanelLeftOpen size={16} />
               </button>
             )}

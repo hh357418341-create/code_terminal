@@ -23,6 +23,7 @@ import {
   type TerminalSessionRuntime,
 } from "./TerminalSessionView";
 import { formatPastedImagePath, getClipboardImageItem, saveClipboardImage } from "./clipboardImages";
+import { createClientId } from "./ids";
 import type { TerminalAppearanceSettings, TerminalCommandRequest } from "./types";
 
 interface TerminalPaneProps {
@@ -156,14 +157,10 @@ function projectTitle(name?: string | null, index?: number) {
 }
 
 function createTerminalTab(index: number, project?: TerminalProjectBinding): TerminalTab {
-  const id =
-    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-      ? crypto.randomUUID()
-      : `${Date.now()}-${Math.random()}`;
   const projectName = project?.name?.trim() || null;
 
   return {
-    id,
+    id: createClientId(),
     projectId: project?.id || null,
     projectName,
     projectPath: project?.path || null,
@@ -1301,8 +1298,12 @@ export function TerminalPane({
           ref={composerInputRef}
           className="terminal-composer-input"
           aria-label="输入内容"
+          autoCapitalize="off"
+          autoCorrect="off"
+          enterKeyHint="send"
           placeholder="输入给当前会话"
           rows={2}
+          spellCheck={false}
           value={composerInputValue}
           onChange={(event) => setComposerInputValue(event.target.value)}
           onBeforeInput={handleComposerBeforeInput}

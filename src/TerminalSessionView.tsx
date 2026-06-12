@@ -3,6 +3,7 @@ import { Terminal as XTerm } from "@xterm/xterm";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import "@xterm/xterm/css/xterm.css";
 import { formatPastedImagePath, getClipboardImageItem, saveClipboardImage } from "./clipboardImages";
+import { createClientId } from "./ids";
 import { invoke, isTauriRuntime, listen } from "./tauriRuntime";
 import { getXtermTheme } from "./terminalThemes";
 import type {
@@ -257,9 +258,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     }
 
     function createConversationId() {
-      return typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-        ? crypto.randomUUID()
-        : `${Date.now()}-${Math.random()}`;
+      return createClientId();
     }
 
     function parseTuiContextUsage(value: string) {
@@ -1919,7 +1918,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
 
       try {
         const size = isVisibleRef.current ? fitTerminal() ?? { cols: 100, rows: 28 } : { cols: 100, rows: 28 };
-        const sessionId = crypto.randomUUID();
+        const sessionId = createClientId();
         startingSessionIdRef.current = sessionId;
         lastResizeRef.current = size;
 
