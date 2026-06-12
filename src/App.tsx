@@ -1,4 +1,6 @@
 import {
+  ChevronLeft,
+  Folder,
   GripVertical,
   ExternalLink,
   FolderOpen,
@@ -11,6 +13,7 @@ import {
   RefreshCw,
   SquareTerminal,
   Trash2,
+  X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { canUseNativeOpenDialog, invoke, openDialog, setWindowTitle } from "./tauriRuntime";
@@ -30,6 +33,7 @@ import type {
   TerminalAppearanceSettings,
   TerminalColorKey,
   WorkbenchState,
+  DirectoryListing,
 } from "./types";
 import type { CSSProperties } from "react";
 
@@ -141,6 +145,14 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [mobileProjectsOpen, setMobileProjectsOpen] = useState(false);
+  const [projectPickerOpen, setProjectPickerOpen] = useState(false);
+  const [directoryListing, setDirectoryListing] = useState<DirectoryListing | null>(null);
+  const [directoryPathInput, setDirectoryPathInput] = useState("");
+  const [newDirectoryName, setNewDirectoryName] = useState("");
+  const [directoryPickerError, setDirectoryPickerError] = useState<string | null>(null);
+  const [isDirectoryLoading, setIsDirectoryLoading] = useState(false);
+  const [isDirectoryCreating, setIsDirectoryCreating] = useState(false);
+  const [isDirectorySelecting, setIsDirectorySelecting] = useState(false);
   const [draggedProjectId, setDraggedProjectId] = useState<string | null>(null);
   const [projectDropTarget, setProjectDropTarget] = useState<{
     id: string;
@@ -311,6 +323,19 @@ export function App() {
   }, [mobileProjectsOpen]);
 
   useEffect(() => {
+    if (!projectPickerOpen) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setProjectPickerOpen(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [projectPickerOpen]);
+
+  useEffect(() => {
     cacheTerminalAppearance(terminalAppearance);
   }, [terminalAppearance]);
 
@@ -365,17 +390,88 @@ export function App() {
 
   async function chooseProject() {
     setError(null);
-    const selected = canUseNativeOpenDialog()
-      ? await openDialog({ directory: true, multiple: false })
-      : window.prompt("输入服务器上的项目目录路径");
+    if (!canUseNativeOpenDialog()) {
+      openProjectPicker();
+      return;
+    }
+
+    const selected = await openDialog({ directory: true, multiple: false });
     if (!selected || Array.isArray(selected)) return;
 
-    const updated = await invoke<WorkbenchState>("upsert_project", { path: selected });
+    await addProjectPath(selected);
+  }
+
+  async function addProjectPath(path: string) {
+    const updated = await invoke<WorkbenchState>("upsert_project", { path });
     if (windowProjectId && updated.activeProjectId) {
       setWindowProjectId(updated.activeProjectId);
     }
     setState(windowProjectId ? applyWindowProject(updated, updated.activeProjectId) : updated);
     setMobileProjectsOpen(false);
+    setProjectPickerOpen(false);
+  }
+
+  function openProjectPicker() {
+    setProjectPickerOpen(true);
+    setDirectoryPickerError(null);
+    setNewDirectoryName("");
+
+    const initialPath = currentProject?.path || directoryListing?.path || "";
+    void loadDirectory(initialPath || undefined);
+  }
+
+  async function loadDirectory(path?: string) {
+    setIsDirectoryLoading(true);
+    setDirectoryPickerError(null);
+    try {
+      const listing = await invoke<DirectoryListing>("list_directory", { path });
+      setDirectoryListing(listing);
+      setDirectoryPathInput(listing.path);
+    } catch (err) {
+      setDirectoryPickerError(String(err));
+    } finally {
+      setIsDirectoryLoading(false);
+    }
+  }
+
+  async function submitDirectoryPath(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await loadDirectory(directoryPathInput);
+  }
+
+  async function createDirectory(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!directoryListing || isDirectoryCreating) return;
+
+    setIsDirectoryCreating(true);
+    setDirectoryPickerError(null);
+    try {
+      const listing = await invoke<DirectoryListing>("create_directory", {
+        parentPath: directoryListing.path,
+        name: newDirectoryName,
+      });
+      setDirectoryListing(listing);
+      setDirectoryPathInput(listing.path);
+      setNewDirectoryName("");
+    } catch (err) {
+      setDirectoryPickerError(String(err));
+    } finally {
+      setIsDirectoryCreating(false);
+    }
+  }
+
+  async function selectCurrentDirectory() {
+    if (!directoryListing || isDirectorySelecting) return;
+
+    setIsDirectorySelecting(true);
+    setDirectoryPickerError(null);
+    try {
+      await addProjectPath(directoryListing.path);
+    } catch (err) {
+      setDirectoryPickerError(String(err));
+    } finally {
+      setIsDirectorySelecting(false);
+    }
   }
 
   async function setActive(projectId: string) {
@@ -697,6 +793,131 @@ export function App() {
           type="button"
           onClick={() => setMobileProjectsOpen(false)}
         />
+      )}
+
+      {projectPickerOpen && (
+        <div className="project-picker-shell" role="dialog" aria-modal="true" aria-label="选择项目目录">
+          <section className="project-picker-panel" aria-busy={isDirectoryLoading}>
+            <header className="project-picker-header">
+              <div>
+                <span className="project-picker-kicker">服务器目录</span>
+                <h2>选择项目目录</h2>
+              </div>
+              <button
+                className="project-picker-icon-button"
+                title="关闭"
+                type="button"
+                onClick={() => setProjectPickerOpen(false)}
+              >
+                <X size={18} />
+              </button>
+            </header>
+
+            <form className="project-picker-path-form" onSubmit={submitDirectoryPath}>
+              <input
+                aria-label="当前目录路径"
+                disabled={isDirectoryLoading}
+                spellCheck={false}
+                value={directoryPathInput}
+                onChange={(event) => setDirectoryPathInput(event.target.value)}
+              />
+              <button className="project-picker-button" disabled={isDirectoryLoading} type="submit">
+                <FolderOpen size={16} />
+                打开
+              </button>
+            </form>
+
+            <div className="project-picker-toolbar">
+              <button
+                className="project-picker-button"
+                disabled={!directoryListing?.parentPath || isDirectoryLoading}
+                type="button"
+                onClick={() => loadDirectory(directoryListing?.parentPath || undefined)}
+              >
+                <ChevronLeft size={16} />
+                上一级
+              </button>
+              <button
+                className="project-picker-button"
+                disabled={isDirectoryLoading}
+                type="button"
+                onClick={() => loadDirectory(directoryListing?.path || directoryPathInput || undefined)}
+              >
+                <RefreshCw size={15} />
+                刷新
+              </button>
+            </div>
+
+            <form className="project-picker-create-form" onSubmit={createDirectory}>
+              <input
+                aria-label="新文件夹名称"
+                autoComplete="off"
+                disabled={!directoryListing || isDirectoryCreating}
+                placeholder="新文件夹名称"
+                value={newDirectoryName}
+                onChange={(event) => setNewDirectoryName(event.target.value)}
+              />
+              <button
+                className="project-picker-button"
+                disabled={!directoryListing || !newDirectoryName.trim() || isDirectoryCreating}
+                type="submit"
+              >
+                <Plus size={16} />
+                新建
+              </button>
+            </form>
+
+            {directoryPickerError && <div className="project-picker-error">{directoryPickerError}</div>}
+
+            <div className="project-picker-current" title={directoryListing?.path || directoryPathInput}>
+              {directoryListing?.path || "正在读取目录..."}
+            </div>
+
+            <div className="project-picker-list" role="list">
+              {isDirectoryLoading && !directoryListing ? (
+                <div className="project-picker-empty">正在读取目录</div>
+              ) : directoryListing?.entries.length ? (
+                directoryListing.entries.map((entry) => (
+                  <button
+                    className="project-picker-entry"
+                    disabled={isDirectoryLoading}
+                    key={entry.path}
+                    title={entry.path}
+                    type="button"
+                    onClick={() => loadDirectory(entry.path)}
+                  >
+                    <Folder size={17} />
+                    <span>
+                      <strong>{entry.name}</strong>
+                      <small>{entry.path}</small>
+                    </span>
+                  </button>
+                ))
+              ) : (
+                <div className="project-picker-empty">当前目录没有子文件夹</div>
+              )}
+            </div>
+
+            <footer className="project-picker-footer">
+              <button
+                className="project-picker-secondary"
+                type="button"
+                onClick={() => setProjectPickerOpen(false)}
+              >
+                取消
+              </button>
+              <button
+                className="project-picker-primary"
+                disabled={!directoryListing || isDirectorySelecting}
+                type="button"
+                onClick={selectCurrentDirectory}
+              >
+                <FolderOpen size={17} />
+                选择当前目录
+              </button>
+            </footer>
+          </section>
+        </div>
       )}
 
       {(!isSidebarCollapsed || mobileProjectsOpen) && (

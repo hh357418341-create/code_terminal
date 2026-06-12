@@ -15,6 +15,17 @@ export interface WorkbenchState {
   customTerminalAppearance?: TerminalAppearanceSettings | null;
 }
 
+export interface DirectoryEntry {
+  name: string;
+  path: string;
+}
+
+export interface DirectoryListing {
+  path: string;
+  parentPath?: string | null;
+  entries: DirectoryEntry[];
+}
+
 export type BuiltInTerminalThemePreset =
   | "workbench"
   | "daylight"

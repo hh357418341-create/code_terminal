@@ -6,7 +6,7 @@ import { defaultTerminalAppearance } from "./terminalThemes";
 import type { OpenDialogOptions, OpenDialogReturn } from "@tauri-apps/plugin-dialog";
 import type { EventCallback, EventName, Options, UnlistenFn } from "@tauri-apps/api/event";
 import type { InvokeArgs, InvokeOptions } from "@tauri-apps/api/core";
-import type { TerminalExit, TerminalOutput, TerminalStarted, WorkbenchState } from "./types";
+import type { DirectoryListing, TerminalExit, TerminalOutput, TerminalStarted, WorkbenchState } from "./types";
 
 const previewSessionIdPrefix = "preview-terminal-";
 let previewTerminalSequence = 0;
@@ -49,6 +49,18 @@ async function previewInvoke<T>(cmd: string, args?: InvokeArgs): Promise<T> {
       return previewState as T;
     case "initial_project_id":
       return null as T;
+    case "list_directory":
+      return ({
+        path: getPreviewCwd(),
+        parentPath: null,
+        entries: [],
+      } satisfies DirectoryListing) as T;
+    case "create_directory":
+      return ({
+        path: getPreviewCwd(),
+        parentPath: null,
+        entries: [],
+      } satisfies DirectoryListing) as T;
     case "set_terminal_appearance":
       if (args && !Array.isArray(args) && !(args instanceof ArrayBuffer) && !(args instanceof Uint8Array)) {
         previewState.terminalAppearance = args.appearance as WorkbenchState["terminalAppearance"];

@@ -121,6 +121,34 @@ struct UpsertProjectRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct ListDirectoryRequest {
+    path: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateDirectoryRequest {
+    parent_path: String,
+    name: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DirectoryEntry {
+    name: String,
+    path: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DirectoryListing {
+    path: String,
+    parent_path: Option<String>,
+    entries: Vec<DirectoryEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct ProjectIdRequest {
     project_id: String,
 }
@@ -233,6 +261,8 @@ pub async fn run() -> Result<(), String> {
             "/api/set_terminal_appearance",
             post(set_terminal_appearance),
         )
+        .route("/api/list_directory", post(list_directory))
+        .route("/api/create_directory", post(create_directory))
         .route("/api/upsert_project", post(upsert_project))
         .route("/api/set_active_project", post(set_active_project))
         .route("/api/reorder_projects", post(reorder_projects))
@@ -397,6 +427,34 @@ async fn set_terminal_appearance(
         current.clone()
     };
     Ok(Json(next_state))
+}
+
+async fn list_directory(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<TokenQuery>,
+    Json(request): Json<ListDirectoryRequest>,
+) -> Result<Json<DirectoryListing>, ApiError> {
+    authorize(&state.config, &headers, query.token.as_deref())?;
+    Ok(Json(directory_listing(request.path.as_deref())?))
+}
+
+async fn create_directory(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<TokenQuery>,
+    Json(request): Json<CreateDirectoryRequest>,
+) -> Result<Json<DirectoryListing>, ApiError> {
+    authorize(&state.config, &headers, query.token.as_deref())?;
+    let parent = normalize_directory_path(&request.parent_path)?;
+    let name = normalize_new_directory_name(&request.name)?;
+    let target = parent.join(name);
+    if target.exists() {
+        return Err(ApiError::bad_request("文件夹已存在"));
+    }
+
+    fs::create_dir(&target).map_err(|error| ApiError::internal(error.to_string()))?;
+    Ok(Json(directory_listing(Some(&path_to_string(&parent)))?))
 }
 
 async fn upsert_project(
@@ -974,6 +1032,74 @@ fn normalize_project_path(path: &str) -> Result<String, ApiError> {
         return Err(ApiError::bad_request("请选择目录"));
     }
     canonicalize_clean(&path).map(|path| path_to_string(&path))
+}
+
+fn directory_listing(path: Option<&str>) -> Result<DirectoryListing, ApiError> {
+    let path = match path.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(path) => normalize_directory_path(path)?,
+        None => env::current_dir()
+            .map_err(|error| ApiError::internal(error.to_string()))
+            .and_then(|path| canonicalize_clean(&path))?,
+    };
+    let parent_path = path.parent().and_then(|parent| {
+        canonicalize_clean(parent)
+            .ok()
+            .map(|parent| path_to_string(&parent))
+    });
+    let mut entries = fs::read_dir(&path)
+        .map_err(|error| ApiError::internal(error.to_string()))?
+        .filter_map(|entry| directory_entry(entry.ok()?))
+        .collect::<Vec<_>>();
+
+    entries.sort_by_key(|entry| entry.name.to_ascii_lowercase());
+
+    Ok(DirectoryListing {
+        path: path_to_string(&path),
+        parent_path,
+        entries,
+    })
+}
+
+fn directory_entry(entry: fs::DirEntry) -> Option<DirectoryEntry> {
+    let file_type = entry.file_type().ok()?;
+    if !file_type.is_dir() {
+        return None;
+    }
+
+    let name = entry.file_name().to_string_lossy().to_string();
+    let path = canonicalize_clean(&entry.path()).ok()?;
+    Some(DirectoryEntry {
+        name,
+        path: path_to_string(&path),
+    })
+}
+
+fn normalize_directory_path(path: &str) -> Result<PathBuf, ApiError> {
+    let path = PathBuf::from(path);
+    if !path.exists() {
+        return Err(ApiError::bad_request("目录不存在"));
+    }
+    if !path.is_dir() {
+        return Err(ApiError::bad_request("请选择目录"));
+    }
+    canonicalize_clean(&path)
+}
+
+fn normalize_new_directory_name(name: &str) -> Result<String, ApiError> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(ApiError::bad_request("请输入文件夹名称"));
+    }
+    if name == "." || name == ".." {
+        return Err(ApiError::bad_request("文件夹名称无效"));
+    }
+    if name.chars().any(|character| {
+        character == '/' || character == '\\' || character.is_control()
+    }) {
+        return Err(ApiError::bad_request("文件夹名称不能包含路径分隔符"));
+    }
+
+    Ok(name.to_string())
 }
 
 fn resolve_terminal_cwd(

@@ -79,6 +79,21 @@ struct TerminalExit {
     code: Option<i32>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DirectoryEntry {
+    name: String,
+    path: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DirectoryListing {
+    path: String,
+    parent_path: Option<String>,
+    entries: Vec<DirectoryEntry>,
+}
+
 const MAX_PASTED_IMAGE_BYTES: usize = 25 * 1024 * 1024;
 
 #[derive(Default)]
@@ -138,6 +153,24 @@ fn set_terminal_appearance(
     }
 
     load_state(store)
+}
+
+#[tauri::command]
+fn list_directory(path: Option<String>) -> Result<DirectoryListing, String> {
+    directory_listing(path.as_deref())
+}
+
+#[tauri::command]
+fn create_directory(parent_path: String, name: String) -> Result<DirectoryListing, String> {
+    let parent = normalize_directory_path(&parent_path)?;
+    let name = normalize_new_directory_name(&name)?;
+    let target = parent.join(name);
+    if target.exists() {
+        return Err("文件夹已存在".into());
+    }
+
+    fs::create_dir(&target).map_err(|error| error.to_string())?;
+    directory_listing(Some(&path_to_string(&parent)))
 }
 
 #[tauri::command]
@@ -531,6 +564,8 @@ pub fn run() {
             load_state,
             initial_project_id,
             set_terminal_appearance,
+            list_directory,
+            create_directory,
             upsert_project,
             set_active_project,
             reorder_projects,
@@ -710,6 +745,74 @@ fn normalize_project_path(path: &str) -> Result<String, String> {
         return Err("请选择目录".into());
     }
     canonicalize_clean(&path).map(|path| path_to_string(&path))
+}
+
+fn directory_listing(path: Option<&str>) -> Result<DirectoryListing, String> {
+    let path = match path.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(path) => normalize_directory_path(path)?,
+        None => std::env::current_dir()
+            .map_err(|error| error.to_string())
+            .and_then(|path| canonicalize_clean(&path))?,
+    };
+    let parent_path = path.parent().and_then(|parent| {
+        canonicalize_clean(parent)
+            .ok()
+            .map(|parent| path_to_string(&parent))
+    });
+    let mut entries = fs::read_dir(&path)
+        .map_err(|error| error.to_string())?
+        .filter_map(|entry| directory_entry(entry.ok()?))
+        .collect::<Vec<_>>();
+
+    entries.sort_by_key(|entry| entry.name.to_ascii_lowercase());
+
+    Ok(DirectoryListing {
+        path: path_to_string(&path),
+        parent_path,
+        entries,
+    })
+}
+
+fn directory_entry(entry: fs::DirEntry) -> Option<DirectoryEntry> {
+    let file_type = entry.file_type().ok()?;
+    if !file_type.is_dir() {
+        return None;
+    }
+
+    let name = entry.file_name().to_string_lossy().to_string();
+    let path = canonicalize_clean(&entry.path()).ok()?;
+    Some(DirectoryEntry {
+        name,
+        path: path_to_string(&path),
+    })
+}
+
+fn normalize_directory_path(path: &str) -> Result<PathBuf, String> {
+    let path = PathBuf::from(path);
+    if !path.exists() {
+        return Err("目录不存在".into());
+    }
+    if !path.is_dir() {
+        return Err("请选择目录".into());
+    }
+    canonicalize_clean(&path)
+}
+
+fn normalize_new_directory_name(name: &str) -> Result<String, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("请输入文件夹名称".into());
+    }
+    if name == "." || name == ".." {
+        return Err("文件夹名称无效".into());
+    }
+    if name.chars().any(|character| {
+        character == '/' || character == '\\' || character.is_control()
+    }) {
+        return Err("文件夹名称不能包含路径分隔符".into());
+    }
+
+    Ok(name.to_string())
 }
 
 fn project_name(path: &str) -> String {
