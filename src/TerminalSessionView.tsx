@@ -15,6 +15,7 @@ import type {
 
 const outputChunkSize = 4096;
 const outputCursorRevealDelayMs = 2400;
+const tuiOutputCursorRevealDelayMs = 8000;
 const resizeDebounceMs = 40;
 const resizeSettleDelays = [80, 180, 360];
 const browserPreviewMessage =
@@ -27,6 +28,8 @@ const maxLiveTuiTranscriptChars = 32000;
 const bracketedPasteSubmitDelayMs = 180;
 const codexStatusWords = ["Working", "Thinking", "Reading", "Editing", "Running"];
 const terminalViewModeStorageKey = "code-terminal-view-mode";
+const lightTuiBackgroundAnsi = ["48", "2", "230", "237", "243"];
+const ansi256ColorLevels = [0, 95, 135, 175, 215, 255];
 
 type ConversationRole = "user" | "terminal";
 type ConversationMessageKind = "normal" | "tui";
@@ -66,6 +69,89 @@ interface ConversationMessage {
 interface TuiContextUsage {
   percent: number;
   mode: "left" | "used";
+}
+
+function getHexColorLuminance(value: string) {
+  const match = value.match(/^#([0-9a-fA-F]{6})$/);
+  if (!match) return 0;
+
+  const color = Number.parseInt(match[1], 16);
+  const red = (color >> 16) & 0xff;
+  const green = (color >> 8) & 0xff;
+  const blue = color & 0xff;
+  return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+}
+
+function getAnsi256Color(index: number) {
+  if (index < 0 || index > 255) return null;
+  if (index === 0) return { red: 0, green: 0, blue: 0 };
+  if (index === 8) return { red: 128, green: 128, blue: 128 };
+  if (index < 16) return null;
+
+  if (index < 232) {
+    const colorIndex = index - 16;
+    return {
+      red: ansi256ColorLevels[Math.floor(colorIndex / 36)],
+      green: ansi256ColorLevels[Math.floor((colorIndex % 36) / 6)],
+      blue: ansi256ColorLevels[colorIndex % 6],
+    };
+  }
+
+  const gray = 8 + (index - 232) * 10;
+  return { red: gray, green: gray, blue: gray };
+}
+
+function isDarkBackgroundColor(red: number, green: number, blue: number) {
+  const max = Math.max(red, green, blue);
+  const min = Math.min(red, green, blue);
+  const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+  return luminance < 96 && (max - min <= 28 || max < 72);
+}
+
+function shouldUseLightTuiBackground(appearance: TerminalAppearanceSettings) {
+  return appearance.preset === "daylight" || getHexColorLuminance(appearance.background) >= 210;
+}
+
+function mapLightThemeTuiBackgrounds(data: string, appearance: TerminalAppearanceSettings) {
+  if (!shouldUseLightTuiBackground(appearance)) return data;
+
+  return data.replace(/\x1b\[([0-9;:]*)m/g, (sequence, rawParams: string) => {
+    const params = (rawParams || "0").split(/[;:]/);
+    const nextParams: string[] = [];
+    let changed = false;
+
+    for (let index = 0; index < params.length; index += 1) {
+      const param = Number(params[index] || 0);
+      const mode = Number(params[index + 1]);
+
+      if (param === 48 && mode === 5 && index + 2 < params.length) {
+        const colorIndex = Number(params[index + 2]);
+        const color = getAnsi256Color(colorIndex);
+        if (color && isDarkBackgroundColor(color.red, color.green, color.blue)) {
+          nextParams.push(...lightTuiBackgroundAnsi);
+          index += 2;
+          changed = true;
+          continue;
+        }
+      }
+
+      if (param === 48 && mode === 2 && index + 4 < params.length) {
+        const red = Number(params[index + 2]);
+        const green = Number(params[index + 3]);
+        const blue = Number(params[index + 4]);
+        if (isDarkBackgroundColor(red, green, blue)) {
+          nextParams.push(...lightTuiBackgroundAnsi);
+          index += 4;
+          changed = true;
+          continue;
+        }
+      }
+
+      nextParams.push(params[index] || "0");
+    }
+
+    return changed ? `\x1b[${nextParams.join(";")}m` : sequence;
+  });
 }
 
 export interface TerminalSessionRuntime {
@@ -125,6 +211,8 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     const isLifecycleStoppingRef = useRef(false);
     const outputQueueRef = useRef<string[]>([]);
     const outputWriterActiveRef = useRef(false);
+    const imeComposingRef = useRef(false);
+    const imeTextareaPositionRef = useRef<{ left: string; top: string } | null>(null);
     const outputCursorTimerRef = useRef<number | null>(null);
     const outputCursorSuppressedRef = useRef(false);
     const lastResizeRef = useRef<{ cols: number; rows: number } | null>(null);
@@ -1394,6 +1482,39 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       revealCursorForInput();
     }
 
+    function handleImeCompositionStart() {
+      imeComposingRef.current = true;
+      const terminal = terminalRef.current;
+      const textarea = terminal?.textarea;
+      const terminalElement = terminal?.element;
+      if (!terminal || !textarea || !terminalElement) return;
+
+      const computedStyle = window.getComputedStyle(terminalElement);
+      const fontSize = Number.parseFloat(computedStyle.fontSize) || appearance.fontSize;
+      const lineHeight = fontSize * appearance.lineHeight;
+      const cellWidth = fontSize * 0.62;
+      const left = `${Math.max(0, terminal.buffer.active.cursorX) * cellWidth}px`;
+      const top = `${Math.max(0, terminal.buffer.active.cursorY) * lineHeight}px`;
+
+      imeTextareaPositionRef.current = {
+        left: textarea.style.left,
+        top: textarea.style.top,
+      };
+      textarea.style.setProperty("left", left, "important");
+      textarea.style.setProperty("top", top, "important");
+    }
+
+    function handleImeCompositionEnd() {
+      imeComposingRef.current = false;
+      const textarea = terminalRef.current?.textarea;
+      const position = imeTextareaPositionRef.current;
+      imeTextareaPositionRef.current = null;
+      if (!textarea || !position) return;
+
+      textarea.style.left = position.left;
+      textarea.style.top = position.top;
+    }
+
     function setOutputCursorSuppressed(suppressed: boolean) {
       outputCursorSuppressedRef.current = suppressed;
       syncCursorSuppressionClass();
@@ -1414,7 +1535,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       }
     }
 
-    function revealCursorAfterOutputSettles() {
+    function revealCursorAfterOutputSettles(isTuiOutput = false) {
       if (!outputCursorSuppressedRef.current) return;
       if (outputCursorTimerRef.current) {
         window.clearTimeout(outputCursorTimerRef.current);
@@ -1424,7 +1545,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         outputCursorTimerRef.current = null;
         if (outputWriterActiveRef.current || outputQueueRef.current.length > 0) return;
         setOutputCursorSuppressed(false);
-      }, outputCursorRevealDelayMs);
+      }, isTuiOutput ? tuiOutputCursorRevealDelayMs : outputCursorRevealDelayMs);
     }
 
     function revealCursorForInput() {
@@ -1447,7 +1568,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         } else {
           liveTuiOutputQueuedRef.current = false;
         }
-        revealCursorAfterOutputSettles();
+        revealCursorAfterOutputSettles(hostRef.current?.classList.contains("terminal-tui-active") ?? false);
         return;
       }
 
@@ -1463,23 +1584,24 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     function enqueueTerminalOutput(data: string) {
       if (!data) return;
 
-      updateTuiContextUsageFromText(data);
+      const displayData = mapLightThemeTuiBackgrounds(data, appearance);
+      updateTuiContextUsageFromText(displayData);
       const terminal = terminalRef.current;
       const activeAlternateBuffer = terminal?.buffer.active.type === "alternate";
       const isAlternateBufferExitOnly =
-        Boolean(activeAlternateBuffer) && hasAlternateBufferDisable(data) && !hasSnapshotVisibleText(data);
+        Boolean(activeAlternateBuffer) && hasAlternateBufferDisable(displayData) && !hasSnapshotVisibleText(displayData);
       const useLiveTerminalOutput =
-        !isAlternateBufferExitOnly && (shouldUseLiveTerminalOutput(data) || activeAlternateBuffer);
+        !isAlternateBufferExitOnly && (shouldUseLiveTerminalOutput(displayData) || activeAlternateBuffer);
 
       if (useLiveTerminalOutput) {
         markLiveTuiSnapshotStart();
         liveTuiOutputQueuedRef.current = true;
       } else {
-        appendConversationMessage("terminal", data);
+        appendConversationMessage("terminal", displayData);
       }
       suppressCursorDuringOutput();
-      for (let index = 0; index < data.length; index += outputChunkSize) {
-        outputQueueRef.current.push(data.slice(index, index + outputChunkSize));
+      for (let index = 0; index < displayData.length; index += outputChunkSize) {
+        outputQueueRef.current.push(displayData.slice(index, index + outputChunkSize));
       }
 
       if (!outputWriterActiveRef.current) {
@@ -1912,6 +2034,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         fontFamily: '"Cascadia Mono", "Cascadia Code", "JetBrains Mono", Consolas, "SFMono-Regular", monospace',
         fontSize: appearance.fontSize,
         lineHeight: appearance.lineHeight,
+        minimumContrastRatio: 4.5,
         smoothScrollDuration: 0,
         scrollback: 4000,
         theme: getXtermTheme(appearance),
@@ -1964,6 +2087,8 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
           .catch(reportTerminalError);
       };
       host.addEventListener("paste", pasteListener, { capture: true });
+      host.addEventListener("compositionstart", handleImeCompositionStart, { capture: true });
+      host.addEventListener("compositionend", handleImeCompositionEnd, { capture: true });
 
       const resizeObserver = new ResizeObserver(() => {
         scheduleFitAndResize();
@@ -1997,6 +2122,8 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         document.removeEventListener("fullscreenchange", scheduleFitAndResize);
         window.visualViewport?.removeEventListener("resize", scheduleFitAndResize);
         host.removeEventListener("paste", pasteListener, { capture: true });
+        host.removeEventListener("compositionstart", handleImeCompositionStart, { capture: true });
+        host.removeEventListener("compositionend", handleImeCompositionEnd, { capture: true });
         terminal.attachCustomKeyEventHandler(() => true);
         bufferDisposable.dispose();
         dataDisposable.dispose();

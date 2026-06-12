@@ -1759,8 +1759,9 @@ textarea {
   background: transparent;
 }
 
-.terminal-host.active.terminal-output-streaming .xterm-cursor {
-  opacity: 1 !important;
+.terminal-host.active.terminal-output-streaming .xterm-cursor,
+.terminal-host.active.terminal-output-streaming .xterm-cursor-layer {
+  opacity: 0 !important;
 }
 
 @media (max-width: 1060px) {
