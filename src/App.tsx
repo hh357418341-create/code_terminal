@@ -4,6 +4,7 @@ import {
   GripVertical,
   ExternalLink,
   FolderOpen,
+  Maximize2,
   Minus,
   Palette,
   PanelLeftClose,
@@ -16,7 +17,17 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { canUseNativeOpenDialog, invoke, openDialog, setWindowTitle } from "./tauriRuntime";
+import {
+  canUseNativeOpenDialog,
+  closeWindow,
+  invoke,
+  isTauriRuntime,
+  minimizeWindow,
+  openDialog,
+  setWindowTitle,
+  startWindowDrag,
+  toggleWindowMaximize,
+} from "./tauriRuntime";
 import { TerminalPane } from "./TerminalPane";
 import {
   clampTerminalFontSize,
@@ -190,6 +201,7 @@ export function App() {
   const appHeaderTitle = currentProject?.name || emptyProjectTitle;
   const appHeaderSubtitle = currentProject?.path || "打开项目目录";
   const appHeaderTooltip = currentProject?.path || emptyProjectTitle;
+  const hasCustomWindowChrome = isTauriRuntime();
   const isSidebarCollapsed = sidebarLayout.collapsed;
   const terminalChromeVars = useMemo(() => {
     const chrome = getTerminalChrome(terminalAppearance);
@@ -218,6 +230,18 @@ export function App() {
       )}px`,
     } as CSSProperties;
   }, [sidebarLayout.collapsed, sidebarLayout.width, terminalAppearance]);
+
+  function handleWindowDrag(event: React.PointerEvent<HTMLElement>) {
+    if (event.button !== 0 || event.detail > 1) return;
+
+    void startWindowDrag().catch(() => undefined);
+  }
+
+  function handleWindowChromeDoubleClick(event: React.MouseEvent<HTMLElement>) {
+    if (event.button !== 0) return;
+
+    void toggleWindowMaximize().catch(() => undefined);
+  }
 
   async function loadState() {
     const [loaded, initialProjectId] = await Promise.all([
@@ -783,7 +807,7 @@ export function App() {
     <main
       className={`shell ${isSidebarCollapsed ? "sidebar-collapsed" : ""} ${
         isSidebarResizing ? "sidebar-resizing" : ""
-      } ${mobileProjectsOpen ? "mobile-projects-open" : ""}`}
+      } ${mobileProjectsOpen ? "mobile-projects-open" : ""} ${hasCustomWindowChrome ? "custom-window-chrome" : ""}`}
       style={terminalChromeVars}
     >
       {mobileProjectsOpen && (
@@ -793,6 +817,55 @@ export function App() {
           type="button"
           onClick={() => setMobileProjectsOpen(false)}
         />
+      )}
+
+      {hasCustomWindowChrome && (
+        <header
+          className="window-chrome"
+          onDoubleClick={handleWindowChromeDoubleClick}
+          onPointerDown={handleWindowDrag}
+        >
+          <div className="window-title-cluster" title={appHeaderTooltip}>
+            <span className="window-brand-mark">
+              <SquareTerminal size={15} />
+            </span>
+            <span className="window-title-copy">
+              <strong>{appHeaderTitle}</strong>
+              <small>{appHeaderSubtitle}</small>
+            </span>
+          </div>
+          <div className="window-drag-region" aria-hidden="true" />
+          <div
+            className="window-controls"
+            onDoubleClick={(event) => event.stopPropagation()}
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            <button
+              className="window-control"
+              title="最小化"
+              type="button"
+              onClick={() => void minimizeWindow().catch(() => undefined)}
+            >
+              <Minus size={15} />
+            </button>
+            <button
+              className="window-control"
+              title="最大化 / 还原"
+              type="button"
+              onClick={() => void toggleWindowMaximize().catch(() => undefined)}
+            >
+              <Maximize2 size={13} />
+            </button>
+            <button
+              className="window-control close"
+              title="关闭"
+              type="button"
+              onClick={() => void closeWindow().catch(() => undefined)}
+            >
+              <X size={15} />
+            </button>
+          </div>
+        </header>
       )}
 
       {projectPickerOpen && (

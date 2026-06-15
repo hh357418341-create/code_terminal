@@ -296,6 +296,30 @@ export function setWindowTitle(title: string) {
   return getCurrentWindow().setTitle(title);
 }
 
+export function startWindowDrag() {
+  if (!isTauriRuntime()) return Promise.resolve();
+
+  return getCurrentWindow().startDragging();
+}
+
+export function minimizeWindow() {
+  if (!isTauriRuntime()) return Promise.resolve();
+
+  return getCurrentWindow().minimize();
+}
+
+export function toggleWindowMaximize() {
+  if (!isTauriRuntime()) return Promise.resolve();
+
+  return getCurrentWindow().toggleMaximize();
+}
+
+export function closeWindow() {
+  if (!isTauriRuntime()) return Promise.resolve();
+
+  return getCurrentWindow().close();
+}
+
 export function openDialog<T extends OpenDialogOptions>(options?: T): Promise<OpenDialogReturn<T>> {
   if (isTauriRuntime()) {
     return tauriOpen(options);
