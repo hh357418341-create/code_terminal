@@ -214,8 +214,6 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     const isLifecycleStoppingRef = useRef(false);
     const outputQueueRef = useRef<string[]>([]);
     const outputWriterActiveRef = useRef(false);
-    const imeComposingRef = useRef(false);
-    const imeTextareaPositionRef = useRef<{ left: string; top: string } | null>(null);
     const outputCursorTimerRef = useRef<number | null>(null);
     const outputCursorSuppressedRef = useRef(false);
     const lastResizeRef = useRef<{ cols: number; rows: number } | null>(null);
@@ -1359,10 +1357,16 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       }, liveTuiSnapshotDebounceMs);
     }
 
+    function blurTerminalInput() {
+      terminalRef.current?.textarea?.blur();
+    }
+
     function showDialogView() {
       setViewMode("dialog");
       rememberTerminalViewMode("dialog");
+      blurTerminalInput();
       window.setTimeout(() => {
+        blurTerminalInput();
         scheduleFitAndResize();
         if (hasLiveTuiSnapshotContext()) {
           captureLiveTuiSnapshot();
@@ -1482,39 +1486,6 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       liveTuiOutputQueuedRef.current = false;
       clearLiveTuiSnapshotTimer();
       revealCursorForInput();
-    }
-
-    function handleImeCompositionStart() {
-      imeComposingRef.current = true;
-      const terminal = terminalRef.current;
-      const textarea = terminal?.textarea;
-      const terminalElement = terminal?.element;
-      if (!terminal || !textarea || !terminalElement) return;
-
-      const computedStyle = window.getComputedStyle(terminalElement);
-      const fontSize = Number.parseFloat(computedStyle.fontSize) || appearance.fontSize;
-      const lineHeight = fontSize * appearance.lineHeight;
-      const cellWidth = fontSize * 0.62;
-      const left = `${Math.max(0, terminal.buffer.active.cursorX) * cellWidth}px`;
-      const top = `${Math.max(0, terminal.buffer.active.cursorY) * lineHeight}px`;
-
-      imeTextareaPositionRef.current = {
-        left: textarea.style.left,
-        top: textarea.style.top,
-      };
-      textarea.style.setProperty("left", left, "important");
-      textarea.style.setProperty("top", top, "important");
-    }
-
-    function handleImeCompositionEnd() {
-      imeComposingRef.current = false;
-      const textarea = terminalRef.current?.textarea;
-      const position = imeTextareaPositionRef.current;
-      imeTextareaPositionRef.current = null;
-      if (!textarea || !position) return;
-
-      textarea.style.left = position.left;
-      textarea.style.top = position.top;
     }
 
     function setOutputCursorSuppressed(suppressed: boolean) {
@@ -2000,7 +1971,11 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       restartSession,
       stopSession,
       focus() {
-        terminalRef.current?.focus();
+        if (viewMode === "terminal") {
+          terminalRef.current?.focus();
+        } else {
+          blurTerminalInput();
+        }
       },
       fit() {
         scheduleFitAndResize();
@@ -2115,8 +2090,6 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
           .catch(reportTerminalError);
       };
       host.addEventListener("paste", pasteListener, { capture: true });
-      host.addEventListener("compositionstart", handleImeCompositionStart, { capture: true });
-      host.addEventListener("compositionend", handleImeCompositionEnd, { capture: true });
 
       const resizeObserver = new ResizeObserver(() => {
         scheduleFitAndResize();
@@ -2150,8 +2123,6 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         document.removeEventListener("fullscreenchange", scheduleFitAndResize);
         window.visualViewport?.removeEventListener("resize", scheduleFitAndResize);
         host.removeEventListener("paste", pasteListener, { capture: true });
-        host.removeEventListener("compositionstart", handleImeCompositionStart, { capture: true });
-        host.removeEventListener("compositionend", handleImeCompositionEnd, { capture: true });
         terminal.attachCustomKeyEventHandler(() => true);
         bufferDisposable.dispose();
         dataDisposable.dispose();
