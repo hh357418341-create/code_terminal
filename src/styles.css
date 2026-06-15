@@ -2131,9 +2131,16 @@ textarea {
 
 .terminal-session.mode-dialog .terminal-host {
   z-index: 1;
-  opacity: 0.01;
+  opacity: 0;
   pointer-events: none;
   visibility: hidden;
+}
+
+.terminal-session.mode-dialog .terminal-host .xterm-cursor,
+.terminal-session.mode-dialog .terminal-host .xterm-cursor-layer,
+.terminal-session.mode-dialog .terminal-host .xterm-helper-textarea {
+  opacity: 0 !important;
+  visibility: hidden !important;
 }
 
 .terminal-session.mode-terminal .terminal-host {

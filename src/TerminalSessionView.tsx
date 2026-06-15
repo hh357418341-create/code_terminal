@@ -31,6 +31,25 @@ const codexStatusWords = ["Working", "Thinking", "Reading", "Editing", "Running"
 const terminalViewModeStorageKey = "code-terminal-view-mode";
 const lightTuiBackgroundAnsi = ["48", "2", "230", "237", "243"];
 const ansi256ColorLevels = [0, 95, 135, 175, 215, 255];
+const tuiRenderDebugEnabled = true;
+const tuiDebugFlushDelayMs = 120;
+const tuiDebugTextPreviewChars = 220;
+
+let tuiDebugLogReady: Promise<void> | null = null;
+let tuiDebugLogPath: string | null = null;
+
+function ensureTuiDebugLogReady() {
+  if (!tuiRenderDebugEnabled || !isTauriRuntime()) return Promise.resolve();
+  if (!tuiDebugLogReady) {
+    tuiDebugLogReady = invoke<string>("clear_tui_debug_log")
+      .then((path) => {
+        tuiDebugLogPath = path || null;
+      })
+      .catch(() => undefined);
+  }
+
+  return tuiDebugLogReady;
+}
 
 type ConversationRole = "user" | "terminal";
 type ConversationMessageKind = "normal" | "tui";
@@ -229,6 +248,13 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     const codexWelcomeMessageIdRef = useRef<string | null>(null);
     const dialogConversationStartedRef = useRef(false);
     const pendingSubmitTimerRef = useRef<number | null>(null);
+    const tuiDebugLinesRef = useRef<string[]>([]);
+    const tuiDebugFlushTimerRef = useRef<number | null>(null);
+    const tuiDebugSequenceRef = useRef(0);
+    const lastFocusDebugTargetRef = useRef<string | null>(null);
+    const lastCursorDebugSignatureRef = useRef<string | null>(null);
+    const lastSnapshotDebugSignatureRef = useRef<string | null>(null);
+    const viewModeRef = useRef<TerminalViewMode>("terminal");
     const [session, setSession] = useState<TerminalStarted | null>(null);
     const [isStarting, setIsStarting] = useState(false);
     const [conversationMessages, setConversationMessages] = useState<ConversationMessage[]>([]);
@@ -242,6 +268,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       }
     });
     activeProjectIdRef.current = activeProjectId;
+    viewModeRef.current = viewMode;
 
     function shouldSuppressTerminalError(err: unknown) {
       const message = String(err);
@@ -256,6 +283,156 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     function reportTerminalError(err: unknown) {
       if (shouldSuppressTerminalError(err)) return;
       onError(String(err));
+    }
+
+    function safeDebugText(value: string, maxLength = tuiDebugTextPreviewChars) {
+      return stripAnsiSequences(value)
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, maxLength);
+    }
+
+    function getElementDebugTarget(element: Element | null) {
+      if (!element) return "none";
+      if (element === terminalRef.current?.textarea) return "xterm-textarea";
+      if (element === hostRef.current) return "terminal-host";
+      if (hostRef.current?.contains(element)) return `${element.tagName.toLowerCase()}.inside-terminal-host`;
+      if (conversationLogRef.current?.contains(element)) return `${element.tagName.toLowerCase()}.inside-dialog-log`;
+      if (element instanceof HTMLElement) {
+        const className = String(element.className || "").trim().replace(/\s+/g, ".");
+        return `${element.tagName.toLowerCase()}${className ? `.${className}` : ""}`;
+      }
+
+      return element.tagName.toLowerCase();
+    }
+
+    function getTerminalDebugState() {
+      const terminal = terminalRef.current;
+      const buffer = terminal?.buffer.active;
+      const host = hostRef.current;
+      const textarea = terminal?.textarea ?? null;
+      const activeElement = document.activeElement;
+      const context = tuiContextUsage;
+
+      return {
+        tabId,
+        sessionId: sessionIdRef.current,
+        viewMode: viewModeRef.current,
+        active: isActiveRef.current,
+        visible: isVisibleRef.current,
+        activeElement: getElementDebugTarget(activeElement),
+        textareaFocused: Boolean(textarea && activeElement === textarea),
+        hostVisible: host ? window.getComputedStyle(host).visibility : null,
+        hostOpacity: host ? window.getComputedStyle(host).opacity : null,
+        hostClasses: host ? Array.from(host.classList).sort().join(" ") : null,
+        outputWriterActive: outputWriterActiveRef.current,
+        outputQueueLength: outputQueueRef.current.length,
+        outputCursorSuppressed: outputCursorSuppressedRef.current,
+        liveTuiOutputQueued: liveTuiOutputQueuedRef.current,
+        liveTuiMessageId: liveTuiMessageIdRef.current,
+        liveTuiSnapshotStartRow: liveTuiSnapshotStartRowRef.current,
+        liveTuiTranscriptRows: liveTuiTranscriptRowsRef.current.length,
+        dialogConversationStarted: dialogConversationStartedRef.current,
+        contextUsage: context ? `${context.percent}:${context.mode}` : null,
+        terminal: terminal
+          ? {
+              cols: terminal.cols,
+              rows: terminal.rows,
+              bufferType: buffer?.type,
+              baseY: buffer?.baseY,
+              cursorX: buffer?.cursorX,
+              cursorY: buffer?.cursorY,
+              length: buffer?.length,
+            }
+          : null,
+      };
+    }
+
+    function summarizeDebugRows(rows: ConversationLine[]) {
+      const texts = rows.map((row) => row.text);
+      const nonEmptyTexts = texts.filter((text) => text.trim());
+      const tail = nonEmptyTexts.slice(-4).map((text) => safeDebugText(text, 120));
+
+      return {
+        count: rows.length,
+        nonEmptyCount: nonEmptyTexts.length,
+        tail,
+        hasFooter: texts.some(isCodexTuiFooterLine),
+        hasActivePrompt: texts.some(isCodexTuiActivePromptLine),
+        hasContext: texts.some((text) => /\bContext\s+\d{1,3}%\s+(?:left|used)\b/i.test(text)),
+      };
+    }
+
+    function flushTuiDebugLog() {
+      if (!tuiRenderDebugEnabled || !isTauriRuntime()) return;
+      if (tuiDebugFlushTimerRef.current) {
+        window.clearTimeout(tuiDebugFlushTimerRef.current);
+        tuiDebugFlushTimerRef.current = null;
+      }
+
+      const lines = tuiDebugLinesRef.current.splice(0, tuiDebugLinesRef.current.length);
+      if (lines.length === 0) return;
+
+      void ensureTuiDebugLogReady()
+        .then(() => invoke("append_tui_debug_log", { lines }))
+        .catch(() => undefined);
+    }
+
+    function writeTuiDebugLog(event: string, data: Record<string, unknown> = {}) {
+      if (!tuiRenderDebugEnabled || !isTauriRuntime()) return;
+
+      tuiDebugSequenceRef.current += 1;
+      const payload = {
+        seq: tuiDebugSequenceRef.current,
+        time: new Date().toISOString(),
+        event,
+        logPath: tuiDebugLogPath,
+        ...getTerminalDebugState(),
+        ...data,
+      };
+
+      try {
+        tuiDebugLinesRef.current.push(JSON.stringify(payload));
+      } catch {
+        tuiDebugLinesRef.current.push(
+          JSON.stringify({
+            seq: tuiDebugSequenceRef.current,
+            time: new Date().toISOString(),
+            event,
+            serializationError: true,
+          }),
+        );
+      }
+
+      if (!tuiDebugFlushTimerRef.current) {
+        tuiDebugFlushTimerRef.current = window.setTimeout(flushTuiDebugLog, tuiDebugFlushDelayMs);
+      }
+    }
+
+    function logFocusDebug(event: string) {
+      const activeElement = getElementDebugTarget(document.activeElement);
+      const signature = `${event}:${activeElement}:${viewModeRef.current}`;
+      if (signature === lastFocusDebugTargetRef.current) return;
+      lastFocusDebugTargetRef.current = signature;
+      writeTuiDebugLog(event, { activeElement });
+    }
+
+    function logCursorDebug(event: string) {
+      const terminal = terminalRef.current;
+      const buffer = terminal?.buffer.active;
+      const signature = [
+        event,
+        viewModeRef.current,
+        buffer?.type,
+        buffer?.baseY,
+        buffer?.cursorX,
+        buffer?.cursorY,
+        outputCursorSuppressedRef.current,
+        liveTuiOutputQueuedRef.current,
+      ].join(":");
+      if (signature === lastCursorDebugSignatureRef.current) return;
+      lastCursorDebugSignatureRef.current = signature;
+      writeTuiDebugLog(event);
     }
 
     function createConversationId() {
@@ -282,6 +459,11 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
           return current;
         }
 
+        writeTuiDebugLog("context-usage-update", {
+          from: current ? `${current.percent}:${current.mode}` : null,
+          to: `${usage.percent}:${usage.mode}`,
+          text: safeDebugText(value),
+        });
         return usage;
       });
     }
@@ -1172,6 +1354,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     }
 
     function formatTerminalSnapshotRows(rawRows: ConversationLine[]) {
+      const rawSummary = summarizeDebugRows(rawRows);
       const recentUserInputs = new Set(recentUserInputsRef.current.map((input) => input.trim()).filter(Boolean));
       let rows = rawRows
         .map((row) => ({
@@ -1237,6 +1420,20 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       }
 
       rows = compactConversationRows(normalizeTuiDialogIndentation(trimConversationRows(rows)));
+      const cleanedSummary = summarizeDebugRows(rows);
+      const snapshotSignature = JSON.stringify({
+        raw: rawSummary,
+        cleaned: cleanedSummary,
+        shouldCleanCodexChrome,
+      });
+      if (snapshotSignature !== lastSnapshotDebugSignatureRef.current) {
+        lastSnapshotDebugSignatureRef.current = snapshotSignature;
+        writeTuiDebugLog("snapshot-normalized", {
+          shouldCleanCodexChrome,
+          raw: rawSummary,
+          cleaned: cleanedSummary,
+        });
+      }
       const text = buildTextFromRows(rows);
       if (text.length <= maxLiveTuiSnapshotChars) return rows;
 
@@ -1275,6 +1472,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
 
       const screenText = buildTextFromRows(rows);
       updateTuiContextUsageFromText(screenText);
+      logCursorDebug("screen-rows-read");
       return rows;
     }
 
@@ -1313,16 +1511,33 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
 
     function upsertLiveTuiMessage(rows: ConversationLine[]) {
       const hasCodexWelcome = upsertCodexWelcomeMessage(rows);
-      if (!dialogConversationStartedRef.current && !hasCodexWelcome) return;
+      if (!dialogConversationStartedRef.current && !hasCodexWelcome) {
+        writeTuiDebugLog("live-tui-skip-before-conversation", {
+          hasCodexWelcome,
+          rows: summarizeDebugRows(rows),
+        });
+        return;
+      }
 
       const normalizedRows = normalizeSnapshotRows(rows);
       const nextTranscriptRows = compactConversationRows(
         mergeTuiTranscriptRows(liveTuiTranscriptRowsRef.current, normalizedRows),
       );
       const nextTranscriptText = buildTextFromRows(nextTranscriptRows);
-      if (!nextTranscriptText.trim()) return;
+      if (!nextTranscriptText.trim()) {
+        writeTuiDebugLog("live-tui-skip-empty-normalized", {
+          raw: summarizeDebugRows(rows),
+          normalized: summarizeDebugRows(normalizedRows),
+        });
+        return;
+      }
 
       liveTuiTranscriptRowsRef.current = nextTranscriptRows;
+      writeTuiDebugLog("live-tui-upsert", {
+        raw: summarizeDebugRows(rows),
+        normalized: summarizeDebugRows(normalizedRows),
+        transcript: summarizeDebugRows(nextTranscriptRows),
+      });
 
       const now = Date.now();
       const messageId = liveTuiMessageIdRef.current ?? createConversationId();
@@ -1362,7 +1577,12 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     function captureLiveTuiSnapshot() {
       const snapshotRows = getTerminalScreenRows();
       if (buildTextFromRows(snapshotRows).trim()) {
+        writeTuiDebugLog("snapshot-capture", {
+          rows: summarizeDebugRows(snapshotRows),
+        });
         upsertLiveTuiMessage(snapshotRows);
+      } else {
+        writeTuiDebugLog("snapshot-capture-empty");
       }
     }
 
@@ -1390,10 +1610,13 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
 
     function showDialogView() {
       setViewMode("dialog");
+      viewModeRef.current = "dialog";
       rememberTerminalViewMode("dialog");
       blurTerminalInput();
+      writeTuiDebugLog("view-mode-dialog");
       window.setTimeout(() => {
         blurTerminalInput();
+        logFocusDebug("view-mode-dialog-after-blur");
         scheduleFitAndResize();
         if (hasLiveTuiSnapshotContext()) {
           captureLiveTuiSnapshot();
@@ -1403,10 +1626,13 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
 
     function showTerminalView() {
       setViewMode("terminal");
+      viewModeRef.current = "terminal";
       rememberTerminalViewMode("terminal");
+      writeTuiDebugLog("view-mode-terminal");
       window.setTimeout(() => {
         scheduleFitAndResize();
         terminalRef.current?.focus();
+        logFocusDebug("view-mode-terminal-after-focus");
       }, 0);
     }
 
@@ -1505,6 +1731,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       }
       hostRef.current?.classList.remove("terminal-tui-active");
       setOutputCursorSuppressed(false);
+      writeTuiDebugLog("output-queue-clear");
     }
 
     function discardQueuedOutput() {
@@ -1513,11 +1740,13 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       liveTuiOutputQueuedRef.current = false;
       clearLiveTuiSnapshotTimer();
       revealCursorForInput();
+      writeTuiDebugLog("output-queue-discard");
     }
 
     function setOutputCursorSuppressed(suppressed: boolean) {
       outputCursorSuppressedRef.current = suppressed;
       syncCursorSuppressionClass();
+      writeTuiDebugLog("cursor-suppressed-change", { suppressed });
     }
 
     function syncCursorSuppressionClass() {
@@ -1541,10 +1770,12 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         window.clearTimeout(outputCursorTimerRef.current);
       }
 
+      writeTuiDebugLog("cursor-reveal-scheduled", { isTuiOutput });
       outputCursorTimerRef.current = window.setTimeout(() => {
         outputCursorTimerRef.current = null;
         if (outputWriterActiveRef.current || outputQueueRef.current.length > 0) return;
         setOutputCursorSuppressed(false);
+        logCursorDebug("cursor-revealed-after-output");
       }, isTuiOutput ? tuiOutputCursorRevealDelayMs : outputCursorRevealDelayMs);
     }
 
@@ -1554,6 +1785,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         outputCursorTimerRef.current = null;
       }
       setOutputCursorSuppressed(false);
+      logCursorDebug("cursor-revealed-for-input");
     }
 
     function pumpTerminalOutput() {
@@ -1562,6 +1794,10 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
 
       if (!terminal || !next) {
         outputWriterActiveRef.current = false;
+        writeTuiDebugLog("output-pump-drained", {
+          hadTerminal: Boolean(terminal),
+          liveTuiOutputQueued: liveTuiOutputQueuedRef.current,
+        });
         if (terminal && liveTuiOutputQueuedRef.current) {
           liveTuiOutputQueuedRef.current = false;
           scheduleLiveTuiSnapshot();
@@ -1573,6 +1809,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       }
 
       terminal.write(next, () => {
+        logCursorDebug("terminal-write-complete");
         if (liveTuiOutputQueuedRef.current) {
           captureLiveTuiSnapshot();
           scheduleLiveTuiSnapshot();
@@ -1593,6 +1830,14 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       const useLiveTerminalOutput =
         !isAlternateBufferExitOnly && (shouldUseLiveTerminalOutput(displayData) || activeAlternateBuffer);
 
+      writeTuiDebugLog("terminal-output-enqueue", {
+        dataLength: data.length,
+        displayLength: displayData.length,
+        activeAlternateBuffer,
+        isAlternateBufferExitOnly,
+        useLiveTerminalOutput,
+        preview: safeDebugText(displayData),
+      });
       if (useLiveTerminalOutput) {
         markLiveTuiSnapshotStart();
         liveTuiOutputQueuedRef.current = true;
@@ -1925,6 +2170,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       clearOutputQueue();
       lastResizeRef.current = null;
       terminal.reset();
+      writeTuiDebugLog("session-start-request");
 
       try {
         const size = isVisibleRef.current ? fitTerminal() ?? { cols: 100, rows: 28 } : { cols: 100, rows: 28 };
@@ -1938,6 +2184,12 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
           projectId: requestedProjectId,
           cols: size.cols,
           rows: size.rows,
+        });
+        writeTuiDebugLog("session-started", {
+          sessionId: started.sessionId,
+          shell: started.shell,
+          cwd: started.cwd,
+          size,
         });
         const projectChangedWhileStarting = (activeProjectIdRef.current || null) !== requestedProjectId;
         if (
@@ -1973,6 +2225,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         sessionIdRef.current = null;
         lastResizeRef.current = null;
         const message = String(err);
+        writeTuiDebugLog("session-start-error", { message });
         terminal.writeln(`\x1b[31m${message}\x1b[0m`);
         onError(message);
       } finally {
@@ -2053,6 +2306,9 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       const host = hostRef.current;
       if (!host) return;
 
+      void ensureTuiDebugLogReady().then(() => {
+        writeTuiDebugLog("debug-log-ready", { path: tuiDebugLogPath });
+      });
       setConversationMessages([]);
       const terminal = new XTerm({
         allowProposedApi: false,
@@ -2075,11 +2331,22 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       terminal.open(host);
       terminalRef.current = terminal;
       fitRef.current = fit;
+      writeTuiDebugLog("xterm-opened", {
+        fontSize: appearance.fontSize,
+        lineHeight: appearance.lineHeight,
+      });
       scheduleFitAndResize();
 
       const bufferDisposable = terminal.buffer.onBufferChange((buffer) => {
         const isAlternateBuffer = buffer.type === "alternate";
         host.classList.toggle("terminal-tui-active", isAlternateBuffer);
+        writeTuiDebugLog("buffer-change", {
+          bufferType: buffer.type,
+          isAlternateBuffer,
+          cursorX: buffer.cursorX,
+          cursorY: buffer.cursorY,
+          baseY: buffer.baseY,
+        });
         if (!isAlternateBuffer) {
           directTerminalInputDraftRef.current = "";
           directTerminalBracketedPasteRef.current = false;
@@ -2094,11 +2361,25 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       const dataDisposable = terminal.onData((data) => {
         const sessionId = sessionIdRef.current;
         if (!sessionId) return;
+        writeTuiDebugLog("xterm-data", {
+          length: data.length,
+          hasReturn: /[\r\n]/.test(data),
+          preview: safeDebugText(data, 80),
+        });
         trackDirectTerminalConversationInput(data);
         markDialogConversationStartedFromTerminalInput(data);
         revealCursorForInput();
         invoke("terminal_write", { sessionId, data }).catch(reportTerminalError);
       });
+
+      const focusInListener = () => {
+        logFocusDebug("focusin");
+      };
+      const focusOutListener = () => {
+        window.setTimeout(() => logFocusDebug("focusout"), 0);
+      };
+      document.addEventListener("focusin", focusInListener);
+      document.addEventListener("focusout", focusOutListener);
       terminal.attachCustomKeyEventHandler((event) => {
         if (isPasteShortcut(event)) return false;
         return true;
@@ -2148,6 +2429,8 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         resizeObserver.disconnect();
         window.removeEventListener("resize", scheduleFitAndResize);
         document.removeEventListener("fullscreenchange", scheduleFitAndResize);
+        document.removeEventListener("focusin", focusInListener);
+        document.removeEventListener("focusout", focusOutListener);
         window.visualViewport?.removeEventListener("resize", scheduleFitAndResize);
         host.removeEventListener("paste", pasteListener, { capture: true });
         terminal.attachCustomKeyEventHandler(() => true);
@@ -2158,6 +2441,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         isLifecycleStoppingRef.current = true;
         dialogConversationStartedRef.current = false;
         clearOutputQueue();
+        flushTuiDebugLog();
         void stopSession();
         terminal.dispose();
         terminalRef.current = null;

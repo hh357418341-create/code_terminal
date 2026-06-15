@@ -71,7 +71,10 @@ async function previewInvoke<T>(cmd: string, args?: InvokeArgs): Promise<T> {
     case "terminal_write":
     case "terminal_resize":
     case "terminal_stop":
+    case "append_tui_debug_log":
       return undefined as T;
+    case "clear_tui_debug_log":
+      return "" as T;
     case "save_pasted_image":
       return "C:\\Temp\\code-terminal\\pasted-images\\preview-paste.png" as T;
     default:

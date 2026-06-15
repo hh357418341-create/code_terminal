@@ -95,6 +95,7 @@ struct DirectoryListing {
 }
 
 const MAX_PASTED_IMAGE_BYTES: usize = 25 * 1024 * 1024;
+const MAX_TUI_DEBUG_LOG_LINE_CHARS: usize = 16 * 1024;
 
 #[derive(Default)]
 struct TerminalRegistry(Mutex<HashMap<String, TerminalSession>>);
@@ -543,6 +544,45 @@ fn save_pasted_image(mime_type: String, bytes: Vec<u8>) -> Result<String, String
     Ok(path_to_string(&path))
 }
 
+#[tauri::command]
+fn clear_tui_debug_log() -> Result<String, String> {
+    let path = tui_debug_log_path();
+    if path.exists() {
+        fs::remove_file(&path).map_err(|error| error.to_string())?;
+    }
+
+    Ok(path_to_string(&path))
+}
+
+#[tauri::command]
+fn append_tui_debug_log(lines: Vec<String>) -> Result<(), String> {
+    if lines.is_empty() {
+        return Ok(());
+    }
+
+    let path = tui_debug_log_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .map_err(|error| error.to_string())?;
+
+    for line in lines {
+        let sanitized = line
+            .replace(['\r', '\n'], " ")
+            .chars()
+            .take(MAX_TUI_DEBUG_LOG_LINE_CHARS)
+            .collect::<String>();
+        writeln!(file, "{sanitized}").map_err(|error| error.to_string())?;
+    }
+
+    Ok(())
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -576,7 +616,9 @@ pub fn run() {
             terminal_write,
             terminal_resize,
             terminal_stop,
-            save_pasted_image
+            save_pasted_image,
+            clear_tui_debug_log,
+            append_tui_debug_log
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
@@ -629,6 +671,12 @@ fn state_file_path(app: &AppHandle) -> Result<PathBuf, String> {
         .app_config_dir()
         .map_err(|error| error.to_string())?;
     Ok(dir.join("workbench-state.json"))
+}
+
+fn tui_debug_log_path() -> PathBuf {
+    std::env::temp_dir()
+        .join("code-terminal")
+        .join("tui-render-debug.ndjson")
 }
 
 fn emit_terminal_output(
