@@ -703,6 +703,48 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       return /^[>›]\s*(?:$|[_▌█|]\s*$)/.test(text);
     }
 
+    function isCodexTuiPromptInputLine(line: string) {
+      const text = normalizeEchoComparison(line);
+      if (!text || /[>›]\s*Improve\b/i.test(text)) return false;
+
+      return isCodexTuiActivePromptLine(text) || /^[>›]\s+\S/.test(text);
+    }
+
+    function getCodexCurrentPromptRowIndexes(lines: string[]) {
+      const promptRowIndexes = new Set<number>();
+      let lastContentIndex = -1;
+      let hasFooterTail = false;
+
+      for (let index = lines.length - 1; index >= 0; index -= 1) {
+        const text = lines[index].trim();
+        if (!text) continue;
+
+        if (isCodexTuiFooterLine(text) || isCodexTuiNoiseLine(text, true)) {
+          hasFooterTail = true;
+          continue;
+        }
+
+        lastContentIndex = index;
+        break;
+      }
+
+      if (lastContentIndex < 0) return promptRowIndexes;
+
+      const promptSearchStart = Math.max(0, lastContentIndex - 6);
+      for (let index = lastContentIndex; index >= promptSearchStart; index -= 1) {
+        if (!isCodexTuiPromptInputLine(lines[index])) continue;
+
+        if (hasFooterTail || isCodexTuiActivePromptLine(lines[index])) {
+          for (let promptIndex = index; promptIndex <= lastContentIndex; promptIndex += 1) {
+            promptRowIndexes.add(promptIndex);
+          }
+        }
+        break;
+      }
+
+      return promptRowIndexes;
+    }
+
     function isCodexTuiNoiseLine(line: string, shouldCleanCodexChrome: boolean) {
       if (!shouldCleanCodexChrome) return false;
 
@@ -1363,16 +1405,25 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         }))
         .map(stripPromptPrefixForSnapshotRow);
       const shouldCleanCodexChrome = hasCodexTuiChrome(rows.map((row) => row.text));
+      const currentPromptRowIndexes = shouldCleanCodexChrome
+        ? getCodexCurrentPromptRowIndexes(rows.map((row) => row.text))
+        : new Set<number>();
 
       rows = rows
-        .map((row) => ({
-          ...row,
-          role:
-            shouldCleanCodexChrome && getCodexHistoricalUserLineText(row.text) !== null
-              ? ("user" as const)
-              : row.role,
-          text: cleanCodexTuiChromeLine(row.text, shouldCleanCodexChrome),
-        }))
+        .map((row, index) => {
+          if (currentPromptRowIndexes.has(index)) {
+            return { ...row, role: undefined, text: "" };
+          }
+
+          return {
+            ...row,
+            role:
+              shouldCleanCodexChrome && getCodexHistoricalUserLineText(row.text) !== null
+                ? ("user" as const)
+                : row.role,
+            text: cleanCodexTuiChromeLine(row.text, shouldCleanCodexChrome),
+          };
+        })
         .filter((row) => {
           const trimmedLine = row.text.trim();
           return (
@@ -1425,11 +1476,13 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         raw: rawSummary,
         cleaned: cleanedSummary,
         shouldCleanCodexChrome,
+        currentPromptRows: currentPromptRowIndexes.size,
       });
       if (snapshotSignature !== lastSnapshotDebugSignatureRef.current) {
         lastSnapshotDebugSignatureRef.current = snapshotSignature;
         writeTuiDebugLog("snapshot-normalized", {
           shouldCleanCodexChrome,
+          currentPromptRows: currentPromptRowIndexes.size,
           raw: rawSummary,
           cleaned: cleanedSummary,
         });
