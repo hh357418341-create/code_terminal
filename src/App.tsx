@@ -53,6 +53,8 @@ const emptyState: WorkbenchState = {
   activeProjectId: null,
 };
 const emptyProjectTitle = "未选择项目";
+const appWindowTitle = "Code Terminal";
+const appWindowSubtitle = "AI Workbench";
 const appearanceStorageKey = "opencode-workbench.terminal-appearance";
 const sidebarLayoutStorageKey = "opencode-workbench.sidebar-layout";
 const defaultSidebarWidth = 292;
@@ -201,6 +203,11 @@ export function App() {
   const appHeaderTitle = currentProject?.name || emptyProjectTitle;
   const appHeaderSubtitle = currentProject?.path || "打开项目目录";
   const appHeaderTooltip = currentProject?.path || emptyProjectTitle;
+  const windowChromeTitle = appWindowTitle;
+  const windowChromeSubtitle = appWindowSubtitle;
+  const windowChromeTooltip = currentProject?.name
+    ? `${currentProject.name} - ${appWindowTitle}`
+    : appWindowTitle;
   const hasCustomWindowChrome = isTauriRuntime();
   const isSidebarCollapsed = sidebarLayout.collapsed;
   const terminalChromeVars = useMemo(() => {
@@ -376,7 +383,7 @@ export function App() {
   }, [terminalAppearance.lineHeight]);
 
   useEffect(() => {
-    const title = currentProject?.name || emptyProjectTitle;
+    const title = currentProject?.name ? `${currentProject.name} - ${appWindowTitle}` : appWindowTitle;
     setWindowTitle(title).catch(() => undefined);
   }, [currentProject?.name]);
 
@@ -825,13 +832,13 @@ export function App() {
           onDoubleClick={handleWindowChromeDoubleClick}
           onPointerDown={handleWindowDrag}
         >
-          <div className="window-title-cluster" title={appHeaderTooltip}>
+          <div className="window-title-cluster" title={windowChromeTooltip}>
             <span className="window-brand-mark">
               <SquareTerminal size={15} />
             </span>
             <span className="window-title-copy">
-              <strong>{appHeaderTitle}</strong>
-              <small>{appHeaderSubtitle}</small>
+              <strong>{windowChromeTitle}</strong>
+              <small>{windowChromeSubtitle}</small>
             </span>
           </div>
           <div className="window-drag-region" aria-hidden="true" />

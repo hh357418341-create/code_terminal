@@ -441,6 +441,8 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         const normalizedLine = normalizeEchoComparison(line);
         return (
           isCodexTuiWelcomeOrPromptChromeLine(normalizedLine) ||
+          isCodexTuiFooterLine(normalizedLine) ||
+          isCodexTuiActivePromptLine(normalizedLine) ||
           /^╭|^╰|^│/.test(normalizedLine) ||
           /\bOpenAI Codex\b/i.test(normalizedLine) ||
           /\b(model|directory|permissions):/i.test(normalizedLine) ||
@@ -498,11 +500,33 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       return matchedStatusWord;
     }
 
+    function isCodexTuiFooterLine(line: string) {
+      const text = normalizeEchoComparison(line);
+      if (!text) return false;
+
+      return (
+        /\bContext\s+\d{1,3}%\s+(?:left|used)\b/i.test(text) ||
+        /\btab\s+to\s+queue\s+message\b/i.test(text) ||
+        /\besc\s+to\s+interrupt\b/i.test(text) ||
+        /\benter\s+to\s+send\b/i.test(text) ||
+        /\bctrl\+j\s+for\s+new\s+line\b/i.test(text) ||
+        /\bshift\+enter\s+for\s+new\s+line\b/i.test(text)
+      );
+    }
+
+    function isCodexTuiActivePromptLine(line: string) {
+      const text = normalizeEchoComparison(line);
+      if (!text) return false;
+
+      return /^[>›]\s*(?:$|[_▌█|]\s*$)/.test(text);
+    }
+
     function isCodexTuiNoiseLine(line: string, shouldCleanCodexChrome: boolean) {
       if (!shouldCleanCodexChrome) return false;
 
       const text = line.trim();
       if (!text) return false;
+      if (isCodexTuiFooterLine(text) || isCodexTuiActivePromptLine(text)) return true;
       if (/^[•●◦○·?\s\d]+$/.test(text)) return true;
       if (getCodexStatusFragmentWord(text)) return false;
 
@@ -553,6 +577,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       if (/^\s*│/.test(text)) return "";
       if (/^\s*╭/.test(text) || /^\s*╰/.test(text)) return "";
       if (isCodexTuiWelcomeOrPromptChromeLine(text)) return "";
+      if (isCodexTuiFooterLine(text) || isCodexTuiActivePromptLine(text)) return "";
       if (/\bOpenAI Codex\b/i.test(text)) return "";
       if (/\b(model|directory|permissions):/i.test(text)) return "";
       if (/\bTip:\b/i.test(text)) return "";
@@ -579,6 +604,8 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
 
       return (
         isCodexTuiWelcomeOrPromptChromeLine(text) ||
+        isCodexTuiFooterLine(text) ||
+        isCodexTuiActivePromptLine(text) ||
         /^╭|^╰|^│/.test(text) ||
         /\bOpenAI Codex\b/i.test(text) ||
         /\b(model|directory|permissions):/i.test(text) ||

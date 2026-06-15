@@ -93,7 +93,7 @@ textarea {
   position: relative;
   grid-column: 1 / -1;
   grid-row: 1;
-  grid-template-columns: minmax(190px, var(--sidebar-width, 292px)) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(190px, 248px) minmax(0, 1fr) auto;
   align-items: center;
   z-index: 120;
   min-width: 0;
@@ -102,13 +102,12 @@ textarea {
   color: var(--terminal-fg, #d8e1e8);
   background:
     linear-gradient(
-      90deg,
-      color-mix(in srgb, var(--app-sidebar, #eef2f6) 96%, var(--terminal-bg, #070b10)) 0
-        var(--sidebar-background-width, 292px),
-      color-mix(in srgb, var(--terminal-panel, #0c1118) 90%, var(--terminal-bg, #070b10))
-        var(--sidebar-background-width, 292px)
+      180deg,
+      color-mix(in srgb, var(--terminal-panel, #0c1118) 94%, var(--terminal-fg, #d8e1e8) 2%),
+      color-mix(in srgb, var(--terminal-panel, #0c1118) 88%, var(--terminal-bg, #070b10))
     );
-  border-bottom: 1px solid color-mix(in srgb, var(--terminal-border, #1a2433) 76%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--terminal-border, #1a2433) 72%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #ffffff 4%, transparent);
   user-select: none;
 }
 
@@ -118,9 +117,9 @@ textarea {
   gap: 9px;
   min-width: 0;
   height: 100%;
-  padding: 0 12px;
-  color: var(--app-text, #1f2933);
-  border-right: 1px solid color-mix(in srgb, var(--app-border, #d7dee7) 82%, transparent);
+  padding: 0 13px;
+  color: var(--terminal-fg, #d8e1e8);
+  border-right: 1px solid color-mix(in srgb, var(--terminal-border, #1a2433) 58%, transparent);
 }
 
 .window-brand-mark {
@@ -151,20 +150,31 @@ textarea {
 }
 
 .window-title-copy strong {
-  color: var(--app-text, #1f2933);
+  color: var(--terminal-fg, #d8e1e8);
   font-size: 12px;
   font-weight: 720;
 }
 
 .window-title-copy small {
-  color: var(--app-muted, #697482);
+  color: var(--terminal-muted, #93a2ae);
   font-size: 10px;
   font-weight: 560;
 }
 
 .window-drag-region {
+  position: relative;
   min-width: 0;
   height: 100%;
+}
+
+.window-drag-region::after {
+  position: absolute;
+  right: 12px;
+  bottom: 7px;
+  left: 12px;
+  height: 1px;
+  content: "";
+  background: color-mix(in srgb, var(--terminal-fg, #d8e1e8) 6%, transparent);
 }
 
 .window-controls {
@@ -2187,7 +2197,7 @@ textarea {
   }
 
   .window-chrome {
-    grid-template-columns: minmax(180px, var(--sidebar-width, 256px)) minmax(0, 1fr) auto;
+    grid-template-columns: minmax(180px, 230px) minmax(0, 1fr) auto;
   }
 
   .brand-copy small,
