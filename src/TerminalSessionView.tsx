@@ -23,21 +23,31 @@ const browserPreviewMessage =
   "Browser preview mode: native terminal sessions run only inside the Tauri app.";
 const conversationOutputMergeWindowMs = 1200;
 const maxConversationMessages = 160;
-const liveTuiSnapshotDebounceMs = 80;
+const maxConversationMessageChars = 12000;
+const liveTuiSnapshotDebounceMs = 180;
 const maxLiveTuiSnapshotChars = 6000;
 const maxLiveTuiTranscriptChars = 32000;
 const bracketedPasteSubmitDelayMs = 180;
 const terminalTuiImeStabilizeHoldMs = 900;
 const codexStatusWords = ["Working", "Thinking", "Reading", "Editing", "Running"];
 const terminalViewModeStorageKey = "code-terminal-view-mode";
+const tuiRenderDebugStorageKey = "code-terminal.tui-render-debug";
 const lightTuiBackgroundAnsi = ["48", "2", "230", "237", "243"];
 const ansi256ColorLevels = [0, 95, 135, 175, 215, 255];
-const tuiRenderDebugEnabled = true;
+const tuiRenderDebugEnabled = readTuiRenderDebugEnabled();
 const tuiDebugFlushDelayMs = 120;
 const tuiDebugTextPreviewChars = 220;
 
 let tuiDebugLogReady: Promise<void> | null = null;
 let tuiDebugLogPath: string | null = null;
+
+function readTuiRenderDebugEnabled() {
+  try {
+    return window.localStorage.getItem(tuiRenderDebugStorageKey) === "1";
+  } catch {
+    return false;
+  }
+}
 
 function ensureTuiDebugLogReady() {
   if (!tuiRenderDebugEnabled || !isTauriRuntime()) return Promise.resolve();
@@ -1177,6 +1187,13 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       return rows.map((row) => row.text).join("\n").replace(/\n{4,}/g, "\n\n\n").trimEnd();
     }
 
+    function truncateConversationText(text: string) {
+      if (text.length <= maxConversationMessageChars) return text;
+
+      const tail = text.slice(-maxConversationMessageChars).trimStart();
+      return `... 已省略前面的长输出 ...\n${tail}`;
+    }
+
     function splitTuiConversationRows(rows: ConversationLine[]) {
       const groups: Array<{ role: ConversationRole; lines: ConversationLine[] }> = [];
 
@@ -1823,6 +1840,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         rememberUserConversationInput(normalizedText);
       }
 
+      const displayText = role === "terminal" ? truncateConversationText(normalizedText) : normalizedText;
       const now = Date.now();
       setConversationMessages((current) => {
         const last = current[current.length - 1];
@@ -1832,11 +1850,12 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
           (last.kind ?? "normal") !== "tui" &&
           now - last.updatedAt <= conversationOutputMergeWindowMs
         ) {
+          const nextText = truncateConversationText(`${last.text}\n${displayText}`.replace(/\n{4,}/g, "\n\n\n"));
           return [
             ...current.slice(0, -1),
             {
               ...last,
-              text: `${last.text}\n${normalizedText}`.replace(/\n{4,}/g, "\n\n\n"),
+              text: nextText,
               lines: undefined,
               updatedAt: now,
             },
@@ -1847,7 +1866,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
           id: createConversationId(),
           role,
           kind: "normal",
-          text: normalizedText,
+          text: displayText,
           lines: undefined,
           createdAt: now,
           updatedAt: now,
@@ -1972,7 +1991,6 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       terminal.write(next, () => {
         logCursorDebug("terminal-write-complete");
         if (liveTuiOutputQueuedRef.current) {
-          captureLiveTuiSnapshot();
           scheduleLiveTuiSnapshot();
         }
         pumpTerminalOutput();

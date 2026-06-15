@@ -432,7 +432,7 @@ fn terminal_start(
     });
 
     thread::spawn(move || {
-        let mut buffer = [0_u8; 1024];
+        let mut buffer = [0_u8; 8192];
         let mut pending_utf8 = Vec::new();
         loop {
             match reader.read(&mut buffer) {
