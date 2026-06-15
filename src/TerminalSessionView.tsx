@@ -27,6 +27,7 @@ const liveTuiSnapshotDebounceMs = 80;
 const maxLiveTuiSnapshotChars = 6000;
 const maxLiveTuiTranscriptChars = 32000;
 const bracketedPasteSubmitDelayMs = 180;
+const terminalTuiImeStabilizeHoldMs = 900;
 const codexStatusWords = ["Working", "Thinking", "Reading", "Editing", "Running"];
 const terminalViewModeStorageKey = "code-terminal-view-mode";
 const lightTuiBackgroundAnsi = ["48", "2", "230", "237", "243"];
@@ -235,6 +236,10 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     const outputWriterActiveRef = useRef(false);
     const outputCursorTimerRef = useRef<number | null>(null);
     const outputCursorSuppressedRef = useRef(false);
+    const terminalTuiImeStableRef = useRef(false);
+    const terminalImeCompositionActiveRef = useRef(false);
+    const terminalImeStabilizeHoldRef = useRef(false);
+    const terminalImeStabilizeHoldTimerRef = useRef<number | null>(null);
     const lastResizeRef = useRef<{ cols: number; rows: number } | null>(null);
     const recentUserInputsRef = useRef<string[]>([]);
     const pendingEchoInputsRef = useRef<string[]>([]);
@@ -328,6 +333,9 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         outputWriterActive: outputWriterActiveRef.current,
         outputQueueLength: outputQueueRef.current.length,
         outputCursorSuppressed: outputCursorSuppressedRef.current,
+        terminalTuiImeStable: terminalTuiImeStableRef.current,
+        terminalImeCompositionActive: terminalImeCompositionActiveRef.current,
+        terminalImeStabilizeHold: terminalImeStabilizeHoldRef.current,
         liveTuiOutputQueued: liveTuiOutputQueuedRef.current,
         liveTuiMessageId: liveTuiMessageIdRef.current,
         liveTuiSnapshotStartRow: liveTuiSnapshotStartRowRef.current,
@@ -1542,6 +1550,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       liveTuiOutputQueuedRef.current = false;
       liveTuiSnapshotStartRowRef.current = null;
       liveTuiTranscriptRowsRef.current = [];
+      clearTerminalImeStabilizeHold();
     }
 
     function clearPendingSubmitTimer() {
@@ -1560,6 +1569,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       const buffer = terminal.buffer.active;
       liveTuiSnapshotStartRowRef.current =
         buffer.type === "alternate" ? 0 : Math.max(0, Math.min(buffer.baseY + buffer.cursorY, buffer.length - 1));
+      syncTerminalTuiImeStableClass();
     }
 
     function upsertLiveTuiMessage(rows: ConversationLine[]) {
@@ -1649,6 +1659,83 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       );
     }
 
+    function shouldStabilizeTerminalTuiIme() {
+      return (
+        viewModeRef.current === "terminal" &&
+        hasLiveTuiSnapshotContext() &&
+        (terminalImeCompositionActiveRef.current || terminalImeStabilizeHoldRef.current)
+      );
+    }
+
+    function syncTerminalTuiImeStableClass() {
+      const stable = shouldStabilizeTerminalTuiIme();
+      if (stable === terminalTuiImeStableRef.current) return;
+
+      terminalTuiImeStableRef.current = stable;
+      hostRef.current?.classList.toggle("terminal-tui-ime-stable", stable);
+      writeTuiDebugLog("terminal-tui-ime-stable-change", { stable });
+    }
+
+    function clearTerminalImeStabilizeHold() {
+      if (terminalImeStabilizeHoldTimerRef.current) {
+        window.clearTimeout(terminalImeStabilizeHoldTimerRef.current);
+        terminalImeStabilizeHoldTimerRef.current = null;
+      }
+      terminalImeStabilizeHoldRef.current = false;
+      syncTerminalTuiImeStableClass();
+    }
+
+    function resetTerminalTuiImeStabilization() {
+      if (terminalImeStabilizeHoldTimerRef.current) {
+        window.clearTimeout(terminalImeStabilizeHoldTimerRef.current);
+        terminalImeStabilizeHoldTimerRef.current = null;
+      }
+      terminalImeCompositionActiveRef.current = false;
+      terminalImeStabilizeHoldRef.current = false;
+      terminalTuiImeStableRef.current = false;
+      hostRef.current?.classList.remove("terminal-tui-ime-stable");
+    }
+
+    function scheduleTerminalImeStabilizeHold() {
+      terminalImeStabilizeHoldRef.current = true;
+      syncTerminalTuiImeStableClass();
+
+      if (terminalImeStabilizeHoldTimerRef.current) {
+        window.clearTimeout(terminalImeStabilizeHoldTimerRef.current);
+      }
+      terminalImeStabilizeHoldTimerRef.current = window.setTimeout(() => {
+        terminalImeStabilizeHoldTimerRef.current = null;
+        terminalImeStabilizeHoldRef.current = false;
+        syncTerminalTuiImeStableClass();
+      }, terminalTuiImeStabilizeHoldMs);
+    }
+
+    function setTerminalImeCompositionActive(active: boolean) {
+      if (terminalImeCompositionActiveRef.current === active) {
+        syncTerminalTuiImeStableClass();
+        return;
+      }
+
+      terminalImeCompositionActiveRef.current = active;
+      writeTuiDebugLog(active ? "terminal-ime-composition-start" : "terminal-ime-composition-end");
+      if (!active) {
+        scheduleTerminalImeStabilizeHold();
+      } else {
+        syncTerminalTuiImeStableClass();
+      }
+    }
+
+    function hasNonAsciiInput(data: string) {
+      return /[^\x00-\x7f]/.test(data);
+    }
+
+    function stabilizeTerminalTuiImeForInput(data: string) {
+      syncTerminalTuiImeStableClass();
+      if (hasNonAsciiInput(data)) {
+        scheduleTerminalImeStabilizeHold();
+      }
+    }
+
     function scheduleLiveTuiSnapshot() {
       clearLiveTuiSnapshotTimer();
       liveTuiSnapshotTimerRef.current = window.setTimeout(() => {
@@ -1665,6 +1752,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       setViewMode("dialog");
       viewModeRef.current = "dialog";
       rememberTerminalViewMode("dialog");
+      syncTerminalTuiImeStableClass();
       blurTerminalInput();
       writeTuiDebugLog("view-mode-dialog");
       window.setTimeout(() => {
@@ -1681,6 +1769,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       setViewMode("terminal");
       viewModeRef.current = "terminal";
       rememberTerminalViewMode("terminal");
+      syncTerminalTuiImeStableClass();
       writeTuiDebugLog("view-mode-terminal");
       window.setTimeout(() => {
         scheduleFitAndResize();
@@ -1783,6 +1872,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         outputCursorTimerRef.current = null;
       }
       hostRef.current?.classList.remove("terminal-tui-active");
+      resetTerminalTuiImeStabilization();
       setOutputCursorSuppressed(false);
       writeTuiDebugLog("output-queue-clear");
     }
@@ -1804,6 +1894,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
 
     function syncCursorSuppressionClass() {
       hostRef.current?.classList.toggle("terminal-output-streaming", outputCursorSuppressedRef.current);
+      syncTerminalTuiImeStableClass();
     }
 
     function suppressCursorDuringOutput() {
@@ -1832,7 +1923,24 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       }, isTuiOutput ? tuiOutputCursorRevealDelayMs : outputCursorRevealDelayMs);
     }
 
-    function revealCursorForInput() {
+    function revealCursorForInput(options: { keepSuppressedForTuiIme?: boolean } = {}) {
+      if (options.keepSuppressedForTuiIme) {
+        stabilizeTerminalTuiImeForInput("");
+        if (shouldStabilizeTerminalTuiIme()) {
+          if (outputCursorTimerRef.current) {
+            window.clearTimeout(outputCursorTimerRef.current);
+            outputCursorTimerRef.current = null;
+          }
+          if (!outputCursorSuppressedRef.current) {
+            setOutputCursorSuppressed(true);
+          } else {
+            syncCursorSuppressionClass();
+          }
+          logCursorDebug("cursor-kept-suppressed-for-tui-ime-input");
+          return;
+        }
+      }
+
       if (outputCursorTimerRef.current) {
         window.clearTimeout(outputCursorTimerRef.current);
         outputCursorTimerRef.current = null;
@@ -1912,7 +2020,8 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       const sessionId = sessionIdRef.current;
       if (!sessionId || !data) return;
 
-      revealCursorForInput();
+      stabilizeTerminalTuiImeForInput(data);
+      revealCursorForInput({ keepSuppressedForTuiIme: true });
       invoke("terminal_write", {
         sessionId,
         data,
@@ -2393,6 +2502,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       const bufferDisposable = terminal.buffer.onBufferChange((buffer) => {
         const isAlternateBuffer = buffer.type === "alternate";
         host.classList.toggle("terminal-tui-active", isAlternateBuffer);
+        syncTerminalTuiImeStableClass();
         writeTuiDebugLog("buffer-change", {
           bufferType: buffer.type,
           isAlternateBuffer,
@@ -2403,6 +2513,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         if (!isAlternateBuffer) {
           directTerminalInputDraftRef.current = "";
           directTerminalBracketedPasteRef.current = false;
+          resetTerminalTuiImeStabilization();
         }
         if (isAlternateBuffer) {
           liveTuiSnapshotStartRowRef.current = 0;
@@ -2421,9 +2532,19 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         });
         trackDirectTerminalConversationInput(data);
         markDialogConversationStartedFromTerminalInput(data);
-        revealCursorForInput();
+        stabilizeTerminalTuiImeForInput(data);
+        revealCursorForInput({ keepSuppressedForTuiIme: true });
         invoke("terminal_write", { sessionId, data }).catch(reportTerminalError);
       });
+
+      const compositionStartListener = () => {
+        setTerminalImeCompositionActive(true);
+      };
+      const compositionEndListener = () => {
+        setTerminalImeCompositionActive(false);
+      };
+      terminal.textarea?.addEventListener("compositionstart", compositionStartListener);
+      terminal.textarea?.addEventListener("compositionend", compositionEndListener);
 
       const focusInListener = () => {
         logFocusDebug("focusin");
@@ -2486,6 +2607,8 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         document.removeEventListener("focusout", focusOutListener);
         window.visualViewport?.removeEventListener("resize", scheduleFitAndResize);
         host.removeEventListener("paste", pasteListener, { capture: true });
+        terminal.textarea?.removeEventListener("compositionstart", compositionStartListener);
+        terminal.textarea?.removeEventListener("compositionend", compositionEndListener);
         terminal.attachCustomKeyEventHandler(() => true);
         bufferDisposable.dispose();
         dataDisposable.dispose();
@@ -2494,6 +2617,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         isLifecycleStoppingRef.current = true;
         dialogConversationStartedRef.current = false;
         clearOutputQueue();
+        resetTerminalTuiImeStabilization();
         flushTuiDebugLog();
         void stopSession();
         terminal.dispose();

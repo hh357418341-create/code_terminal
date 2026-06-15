@@ -2188,6 +2188,13 @@ textarea {
   opacity: 0 !important;
 }
 
+.terminal-host.active.terminal-tui-ime-stable .xterm-cursor,
+.terminal-host.active.terminal-tui-ime-stable .xterm-cursor-layer,
+.terminal-host.active.terminal-tui-ime-stable .composition-view {
+  opacity: 0 !important;
+  visibility: hidden !important;
+}
+
 @media (max-width: 1060px) {
   body {
     min-width: 820px;
