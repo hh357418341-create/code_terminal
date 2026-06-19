@@ -221,6 +221,11 @@ textarea {
   display: none;
 }
 
+.mobile-chrome-toggle-button,
+.mobile-chrome-restore-button {
+  display: none;
+}
+
 .sidebar {
   display: flex;
   position: relative;
@@ -2384,6 +2389,31 @@ textarea {
     display: inline-flex;
   }
 
+  .mobile-chrome-toggle-button {
+    display: inline-flex;
+  }
+
+  .mobile-chrome-restore-button {
+    position: fixed;
+    top: calc(env(safe-area-inset-top, 0px) + 8px);
+    right: calc(env(safe-area-inset-right, 0px) + 8px);
+    z-index: 70;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    min-height: 34px;
+    padding: 0;
+    color: var(--terminal-fg, #d8e1e8);
+    background: color-mix(in srgb, var(--terminal-bg, #070b10) 82%, transparent);
+    border: 1px solid color-mix(in srgb, var(--terminal-border, #1a2433) 74%, transparent);
+    border-radius: 8px;
+    box-shadow: 0 8px 18px color-mix(in srgb, #000000 32%, transparent);
+  }
+
+  .shell.mobile-chrome-hidden .mobile-chrome-restore-button {
+    display: inline-flex;
+  }
+
   .desktop-sidebar-open-button {
     display: none;
   }
@@ -2538,6 +2568,48 @@ textarea {
     width: 38px;
     height: 38px;
     margin-bottom: 0;
+  }
+
+  .shell.mobile-chrome-hidden .workspace-bar,
+  .shell.mobile-chrome-hidden .appearance-bar,
+  .shell.mobile-chrome-hidden .terminal-bar,
+  .shell.mobile-chrome-hidden .terminal-view-switch,
+  .shell.mobile-chrome-hidden .terminal-dialog-context,
+  .shell.mobile-chrome-hidden .terminal-cell-header {
+    display: none;
+  }
+
+  .shell.mobile-chrome-hidden .terminal-pane {
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+
+  .shell.mobile-chrome-hidden .terminal-surface {
+    gap: 0;
+    padding: 0;
+  }
+
+  .shell.mobile-chrome-hidden .terminal-cell {
+    grid-template-rows: minmax(0, 1fr);
+    border-width: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .shell.mobile-chrome-hidden .terminal-cell::before {
+    display: none;
+  }
+
+  .shell.mobile-chrome-hidden .terminal-host .xterm {
+    padding: 4px 5px;
+  }
+
+  .shell.mobile-chrome-hidden .terminal-dialog-log,
+  .shell.mobile-chrome-hidden .terminal-session.has-context .terminal-dialog-log {
+    padding: 8px 8px 6px;
+  }
+
+  .shell.mobile-chrome-hidden .terminal-composer {
+    padding: 4px 6px 6px;
   }
 }
 

@@ -6,6 +6,7 @@ import {
   FolderOpen,
   Maximize2,
   Minus,
+  Minimize2,
   Palette,
   PanelLeftClose,
   PanelLeftOpen,
@@ -57,6 +58,7 @@ const appWindowTitle = "Code Terminal";
 const appWindowSubtitle = "AI Workbench";
 const appearanceStorageKey = "opencode-workbench.terminal-appearance";
 const sidebarLayoutStorageKey = "opencode-workbench.sidebar-layout";
+const mobileChromeStorageKey = "opencode-workbench.mobile-chrome-hidden";
 const defaultSidebarWidth = 292;
 const minSidebarWidth = 236;
 const maxSidebarWidth = 420;
@@ -118,6 +120,22 @@ function cacheSidebarLayout(layout: SidebarLayoutSettings) {
   window.localStorage.setItem(sidebarLayoutStorageKey, JSON.stringify(normalizeSidebarLayout(layout)));
 }
 
+function readStoredMobileChromeHidden() {
+  try {
+    return window.localStorage.getItem(mobileChromeStorageKey) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function cacheMobileChromeHidden(hidden: boolean) {
+  try {
+    window.localStorage.setItem(mobileChromeStorageKey, hidden ? "true" : "false");
+  } catch {
+    // Ignore storage failures; the in-session preference still applies.
+  }
+}
+
 function getWindowProjectId() {
   try {
     return new URLSearchParams(window.location.search).get("projectId");
@@ -159,6 +177,7 @@ export function App() {
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [mobileProjectsOpen, setMobileProjectsOpen] = useState(false);
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
+  const [mobileChromeHidden, setMobileChromeHidden] = useState(readStoredMobileChromeHidden);
   const [directoryListing, setDirectoryListing] = useState<DirectoryListing | null>(null);
   const [directoryPathInput, setDirectoryPathInput] = useState("");
   const [newDirectoryName, setNewDirectoryName] = useState("");
@@ -369,6 +388,10 @@ export function App() {
   useEffect(() => {
     cacheTerminalAppearance(terminalAppearance);
   }, [terminalAppearance]);
+
+  useEffect(() => {
+    cacheMobileChromeHidden(mobileChromeHidden);
+  }, [mobileChromeHidden]);
 
   useEffect(() => {
     sidebarLayoutRef.current = sidebarLayout;
@@ -814,7 +837,9 @@ export function App() {
     <main
       className={`shell ${isSidebarCollapsed ? "sidebar-collapsed" : ""} ${
         isSidebarResizing ? "sidebar-resizing" : ""
-      } ${mobileProjectsOpen ? "mobile-projects-open" : ""} ${hasCustomWindowChrome ? "custom-window-chrome" : ""}`}
+      } ${mobileProjectsOpen ? "mobile-projects-open" : ""} ${
+        mobileChromeHidden ? "mobile-chrome-hidden" : ""
+      } ${hasCustomWindowChrome ? "custom-window-chrome" : ""}`}
       style={terminalChromeVars}
     >
       {mobileProjectsOpen && (
@@ -874,6 +899,15 @@ export function App() {
           </div>
         </header>
       )}
+
+      <button
+        className="mobile-chrome-restore-button"
+        title="显示顶部功能"
+        type="button"
+        onClick={() => setMobileChromeHidden(false)}
+      >
+        <Minimize2 size={16} />
+      </button>
 
       {projectPickerOpen && (
         <div className="project-picker-shell" role="dialog" aria-modal="true" aria-label="选择项目目录">
@@ -1155,6 +1189,16 @@ export function App() {
               onClick={() => setAppearanceOpen((open) => !open)}
             >
               <Palette size={16} />
+            </button>
+
+            <button
+              className={`icon-button mobile-chrome-toggle-button ${mobileChromeHidden ? "active" : ""}`}
+              title={mobileChromeHidden ? "显示顶部功能" : "隐藏顶部功能"}
+              type="button"
+              aria-pressed={mobileChromeHidden}
+              onClick={() => setMobileChromeHidden((hidden) => !hidden)}
+            >
+              {mobileChromeHidden ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
             </button>
 
             {currentProject && (
