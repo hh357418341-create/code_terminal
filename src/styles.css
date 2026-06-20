@@ -2365,6 +2365,8 @@ textarea {
   }
 
   .workspace-bar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
     min-height: 48px;
     padding: 8px 10px;
   }
@@ -2383,6 +2385,11 @@ textarea {
 
   .project-heading {
     gap: 8px;
+    min-width: 0;
+  }
+
+  .project-heading > div {
+    min-width: 0;
   }
 
   .mobile-project-menu-button {
@@ -2419,16 +2426,107 @@ textarea {
   }
 
   .project-heading h2 {
-    max-width: 44vw;
+    max-width: 100%;
     overflow: hidden;
     font-size: 14px;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-  .workspace-actions,
+  .workspace-actions {
+    max-width: min(46vw, 168px);
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+  }
+
+  .workspace-actions::-webkit-scrollbar {
+    display: none;
+  }
+
+  .workspace-actions .icon-button {
+    flex: 0 0 auto;
+  }
+
   .terminal-actions {
     gap: 4px;
+  }
+
+  .appearance-bar {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: stretch;
+    gap: 8px;
+    min-height: 0;
+    padding: 8px;
+  }
+
+  .appearance-group {
+    justify-self: stretch;
+    min-width: 0;
+  }
+
+  .theme-group {
+    grid-column: 1 / -1;
+  }
+
+  .theme-segments {
+    min-height: 30px;
+  }
+
+  .theme-choice {
+    min-height: 24px;
+    padding: 0 7px;
+    font-size: 11px;
+  }
+
+  .value-stepper {
+    width: 100%;
+    min-height: 30px;
+    justify-content: space-between;
+  }
+
+  .value-stepper button {
+    width: 24px;
+    min-height: 24px;
+  }
+
+  .value-input {
+    width: 42px;
+    height: 24px;
+    padding: 0 4px;
+  }
+
+  .color-group {
+    grid-column: 1 / -1;
+    gap: 6px;
+    width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+  }
+
+  .color-group::-webkit-scrollbar {
+    display: none;
+  }
+
+  .color-field {
+    flex: 1 0 calc((100% - 12px) / 3);
+    justify-content: space-between;
+    min-width: 84px;
+    min-height: 30px;
+    padding: 0 7px;
+    background: color-mix(in srgb, var(--terminal-fg, #d8e1e8) 6%, transparent);
+    border: 1px solid color-mix(in srgb, var(--terminal-border, #24313a) 68%, transparent);
+    border-radius: 7px;
+  }
+
+  .color-field input {
+    width: 26px;
+    height: 22px;
+    flex: 0 0 auto;
   }
 
   .project-picker-shell {

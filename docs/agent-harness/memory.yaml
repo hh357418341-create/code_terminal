@@ -1,0 +1,84 @@
+schema_version: 1
+updated: "2026-06-20"
+
+project:
+  name: "Code Terminal"
+  repo_root: "D:\\freelife\\opencode-workbench"
+  summary: "Tauri + React + TypeScript + Rust terminal workbench with desktop exe and server Web UI."
+  language: "zh-CN"
+  primary_surfaces:
+    - "Windows desktop exe"
+    - "Linux server Web UI for phone access"
+
+commands:
+  install: "npm install"
+  dev_frontend: "npm run dev:frontend"
+  dev_tauri: "npm run dev"
+  build_frontend: "npm run build:frontend"
+  build_windows_exe: "npm run build"
+  build_server: "npm run build:server"
+  run_server: "npm run server"
+
+artifacts:
+  frontend_dist: "dist/"
+  windows_exe: "src-tauri/target/release/code-terminal.exe"
+  server_binary: "src-tauri/target/release/code-terminal-server"
+
+deployment:
+  phone_server:
+    host: "8.130.142.159"
+    public_url: "http://8.130.142.159:8787/"
+    ssh_user: "root"
+    app_dir: "/opt/code-terminal"
+    dist_dir: "/opt/code-terminal/dist"
+    service: "code-terminal.service"
+    env_file: "/etc/code-terminal.env"
+    state_file: "/opt/code-terminal-state/workbench-state.json"
+    listen_addr: "0.0.0.0:8787"
+    deploy_method:
+      - "Build local frontend dist."
+      - "Create a tar from dist into a temporary ignored path."
+      - "Upload the tar to /tmp on the server."
+      - "Extract to a timestamped /opt/code-terminal/dist.deploy-* directory."
+      - "Verify index.html and hashed JS/CSS exist before switching."
+      - "Move current /opt/code-terminal/dist to dist.bak-*."
+      - "Move the new directory to /opt/code-terminal/dist."
+      - "Restart code-terminal.service."
+      - "Verify systemctl is-active, ss :8787, local curl, and public curl."
+    secret_policy: "Never store the root password or CODE_TERMINAL_TOKEN in repo files, commits, harness memory, or final answers."
+
+validation:
+  frontend:
+    - "npm run build:frontend"
+  desktop:
+    - "npm run build"
+  mobile_ui:
+    viewports:
+      - "390x844"
+      - "360x740"
+    checks:
+      - "No overlap between workspace actions and appearance controls."
+      - "Color controls remain visible and clickable."
+      - "Mobile chrome hide mode maximizes the terminal area."
+      - "Composer still keeps Enter send and Shift+Enter newline behavior."
+  server:
+    - "systemctl is-active code-terminal.service"
+    - "ss -ltnp | grep ':8787'"
+    - "curl -fsS http://127.0.0.1:8787/ | sed -n '1,20p'"
+    - "curl.exe -fsS -I http://8.130.142.159:8787/"
+
+ux_memory:
+  mobile:
+    - "The phone Web UI should prioritize terminal space."
+    - "Top function buttons must be hideable or compact on mobile."
+    - "Toolbar/actions must not squeeze the color/theme/font controls."
+    - "Appearance controls should wrap, scroll, or collapse instead of compressing."
+  terminal_input:
+    - "Enter sends when composer has text."
+    - "Shift+Enter inserts newline."
+    - "Empty composer Enter and navigation keys pass through to the active TUI/terminal."
+
+known_untracked_do_not_touch:
+  - "code-terminal-deploy.tar"
+  - "docs/PixPin_2026-06-10_08-37-13.mp4"
+
