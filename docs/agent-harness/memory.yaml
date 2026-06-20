@@ -73,6 +73,7 @@ ux_memory:
     - "Top function buttons must be hideable or compact on mobile."
     - "Toolbar/actions must not squeeze the color/theme/font controls."
     - "Appearance controls should wrap, scroll, or collapse instead of compressing."
+    - "Font-size and line-height steppers must not overlap on phone widths; validate their groups, steppers, and inputs separately."
   terminal_input:
     - "Enter sends when composer has text."
     - "Shift+Enter inserts newline."
@@ -81,4 +82,3 @@ ux_memory:
 known_untracked_do_not_touch:
   - "code-terminal-deploy.tar"
   - "docs/PixPin_2026-06-10_08-37-13.mp4"
-
