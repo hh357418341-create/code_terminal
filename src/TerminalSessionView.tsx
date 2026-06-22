@@ -19,6 +19,7 @@ const outputCursorRevealDelayMs = 2400;
 const tuiOutputCursorRevealDelayMs = 8000;
 const resizeDebounceMs = 40;
 const resizeSettleDelays = [80, 180, 360];
+const terminalHostSizeEpsilon = 1;
 const browserPreviewMessage =
   "Browser preview mode: native terminal sessions run only inside the Tauri app.";
 const conversationOutputMergeWindowMs = 1200;
@@ -29,7 +30,7 @@ const maxLiveTuiSnapshotChars = 6000;
 const maxLiveTuiTranscriptChars = 32000;
 const bracketedPasteSubmitDelayMs = 180;
 const terminalTuiImeStabilizeHoldMs = 900;
-const codexStatusWords = ["Working", "Thinking", "Reading", "Editing", "Running"];
+const codexStatusWords = ["Working", "Thinking", "Reading", "Editing", "Running", "Inspecting"];
 const terminalViewModeStorageKey = "code-terminal-view-mode";
 const tuiRenderDebugStorageKey = "code-terminal.tui-render-debug";
 const lightTuiBackgroundAnsi = ["48", "2", "230", "237", "243"];
@@ -251,6 +252,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     const terminalImeStabilizeHoldRef = useRef(false);
     const terminalImeStabilizeHoldTimerRef = useRef<number | null>(null);
     const lastResizeRef = useRef<{ cols: number; rows: number } | null>(null);
+    const lastFitHostSizeRef = useRef<{ width: number; height: number } | null>(null);
     const recentUserInputsRef = useRef<string[]>([]);
     const pendingEchoInputsRef = useRef<string[]>([]);
     const liveTuiMessageIdRef = useRef<string | null>(null);
@@ -826,9 +828,8 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       text = text.replace(/[>›]\s*Improve.*$/i, "").trimEnd();
       text = text.replace(/\([^)]*\besc to interrupt\b[^)]*\)/gi, "").trimEnd();
 
-      const statusInFooter = text.match(/\b(Working|Thinking|Reading|Editing|Running)\b\s*$/i);
       if (/\bContext\s+\d+%\s+(?:left|used)\b/i.test(text)) {
-        return statusInFooter ? statusInFooter[1] : "";
+        return "";
       }
 
       if (/^\s*>/.test(text)) return "";
@@ -865,12 +866,9 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       if (!shouldCleanCodexChrome) return lines;
 
       const contentLines: string[] = [];
-      let lastStatusWord: string | null = null;
-
       for (const line of lines) {
         const statusWord = getCodexStatusWord(line) ?? getCodexStatusFragmentWord(line);
         if (statusWord) {
-          lastStatusWord = statusWord;
           continue;
         }
 
@@ -888,7 +886,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         contentLines.pop();
       }
 
-      return contentLines.length > 0 ? contentLines : lastStatusWord ? [lastStatusWord] : [];
+      return contentLines;
     }
 
     function dropWrappedEchoPrefix(lines: string[]) {
@@ -1600,6 +1598,14 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       }
 
       const normalizedRows = normalizeSnapshotRows(rows);
+      if (normalizedRows.length === 0) {
+        writeTuiDebugLog("live-tui-skip-empty-normalized", {
+          raw: summarizeDebugRows(rows),
+          normalized: summarizeDebugRows(normalizedRows),
+        });
+        return;
+      }
+
       const nextTranscriptRows = compactConversationRows(
         mergeTuiTranscriptRows(liveTuiTranscriptRowsRef.current, normalizedRows),
       );
@@ -1775,7 +1781,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       window.setTimeout(() => {
         blurTerminalInput();
         logFocusDebug("view-mode-dialog-after-blur");
-        scheduleFitAndResize();
+        scheduleFitAndResize({ force: true, settle: true });
         if (hasLiveTuiSnapshotContext()) {
           captureLiveTuiSnapshot();
         }
@@ -1789,7 +1795,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       syncTerminalTuiImeStableClass();
       writeTuiDebugLog("view-mode-terminal");
       window.setTimeout(() => {
-        scheduleFitAndResize();
+        scheduleFitAndResize({ force: true, settle: true });
         terminalRef.current?.focus();
         logFocusDebug("view-mode-terminal-after-focus");
       }, 0);
@@ -2237,6 +2243,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       pendingStartSessionRef.current = false;
       pendingRawInputRef.current = null;
       lastResizeRef.current = null;
+      lastFitHostSizeRef.current = null;
       directTerminalInputDraftRef.current = "";
       directTerminalBracketedPasteRef.current = false;
       isLifecycleStoppingRef.current = true;
@@ -2268,22 +2275,54 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       };
     }
 
-    function fitTerminal() {
+    function getTerminalHostSize() {
+      const host = hostRef.current;
+      if (!host) return null;
+
+      const rect = host.getBoundingClientRect();
+      return {
+        width: rect.width,
+        height: rect.height,
+      };
+    }
+
+    function hasTerminalHostSizeChanged(nextSize: { width: number; height: number } | null) {
+      if (!nextSize || nextSize.width <= 0 || nextSize.height <= 0) return false;
+
+      const previousSize = lastFitHostSizeRef.current;
+      if (!previousSize) return true;
+
+      return (
+        Math.abs(previousSize.width - nextSize.width) >= terminalHostSizeEpsilon ||
+        Math.abs(previousSize.height - nextSize.height) >= terminalHostSizeEpsilon
+      );
+    }
+
+    function fitTerminal(options: { force?: boolean } = {}) {
       const terminal = terminalRef.current;
       const fit = fitRef.current;
       if (!terminal || !fit) return null;
 
+      const hostSize = getTerminalHostSize();
+      if (!options.force && !hasTerminalHostSizeChanged(hostSize)) {
+        return {
+          cols: terminal.cols || 100,
+          rows: terminal.rows || 28,
+        };
+      }
+
       fit.fit();
+      lastFitHostSizeRef.current = hostSize;
       return {
         cols: terminal.cols || 100,
         rows: terminal.rows || 28,
       };
     }
 
-    function fitAndResize() {
+    function fitAndResize(options: { force?: boolean } = {}) {
       if (!isVisibleRef.current) return;
 
-      const size = fitTerminal();
+      const size = fitTerminal(options);
       const sessionId = sessionIdRef.current;
       if (!size || !sessionId) return;
 
@@ -2313,22 +2352,24 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       resizeSettleTimersRef.current = [];
     }
 
-    function scheduleFitAndResize() {
+    function scheduleFitAndResize(options: { force?: boolean; settle?: boolean } = {}) {
       if (!isVisibleRef.current) return;
 
       clearScheduledResize();
       resizeTimerRef.current = window.setTimeout(() => {
         resizeTimerRef.current = null;
-        fitAndResize();
+        fitAndResize({ force: options.force });
 
         resizeFrameRef.current = window.requestAnimationFrame(() => {
           resizeFrameRef.current = null;
-          fitAndResize();
+          fitAndResize({ force: options.force });
         });
 
-        resizeSettleTimersRef.current = resizeSettleDelays.map((delay) =>
-          window.setTimeout(fitAndResize, delay),
-        );
+        if (options.force || options.settle) {
+          resizeSettleTimersRef.current = resizeSettleDelays.map((delay) =>
+            window.setTimeout(() => fitAndResize({ force: options.force }), delay),
+          );
+        }
       }, resizeDebounceMs);
     }
 
@@ -2349,11 +2390,12 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       setIsStarting(true);
       clearOutputQueue();
       lastResizeRef.current = null;
+      lastFitHostSizeRef.current = null;
       terminal.reset();
       writeTuiDebugLog("session-start-request");
 
       try {
-        const size = isVisibleRef.current ? fitTerminal() ?? { cols: 100, rows: 28 } : { cols: 100, rows: 28 };
+        const size = isVisibleRef.current ? fitTerminal({ force: true }) ?? { cols: 100, rows: 28 } : { cols: 100, rows: 28 };
         const sessionId = createClientId();
         const requestedProjectId = activeProjectIdRef.current || null;
         startingSessionIdRef.current = sessionId;
@@ -2381,6 +2423,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
             startingSessionIdRef.current = null;
           }
           lastResizeRef.current = null;
+          lastFitHostSizeRef.current = null;
           await invoke("terminal_stop", { sessionId: started.sessionId }).catch(() => undefined);
           if (projectChangedWhileStarting && !isLifecycleStoppingRef.current) {
             pendingStartSessionRef.current = true;
@@ -2398,12 +2441,13 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         if (!isTauriRuntime() && started.shell === "Browser preview") {
           terminal.writeln(`\x1b[38;5;245m${browserPreviewMessage}\x1b[0m`);
         }
-        scheduleFitAndResize();
+        scheduleFitAndResize({ force: true, settle: true });
         await flushPendingRawInput(started.sessionId);
       } catch (err) {
         startingSessionIdRef.current = null;
         sessionIdRef.current = null;
         lastResizeRef.current = null;
+        lastFitHostSizeRef.current = null;
         const message = String(err);
         writeTuiDebugLog("session-start-error", { message });
         terminal.writeln(`\x1b[31m${message}\x1b[0m`);
@@ -2471,7 +2515,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       isActiveRef.current = isActive;
 
       if (isActive) {
-        scheduleFitAndResize();
+        scheduleFitAndResize({ force: true, settle: true });
       }
     }, [isActive]);
 
@@ -2479,7 +2523,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       isVisibleRef.current = isVisible;
       if (!isVisible) return;
 
-      scheduleFitAndResize();
+      scheduleFitAndResize({ force: true, settle: true });
     }, [isVisible]);
 
     useEffect(() => {
@@ -2515,7 +2559,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         fontSize: appearance.fontSize,
         lineHeight: appearance.lineHeight,
       });
-      scheduleFitAndResize();
+      scheduleFitAndResize({ force: true, settle: true });
 
       const bufferDisposable = terminal.buffer.onBufferChange((buffer) => {
         const isAlternateBuffer = buffer.type === "alternate";
@@ -2594,10 +2638,14 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       const resizeObserver = new ResizeObserver(() => {
         scheduleFitAndResize();
       });
+      const handleViewportResize = () => {
+        lastFitHostSizeRef.current = null;
+        scheduleFitAndResize({ force: true, settle: true });
+      };
       resizeObserver.observe(host);
-      window.addEventListener("resize", scheduleFitAndResize);
-      document.addEventListener("fullscreenchange", scheduleFitAndResize);
-      window.visualViewport?.addEventListener("resize", scheduleFitAndResize);
+      window.addEventListener("resize", handleViewportResize);
+      document.addEventListener("fullscreenchange", handleViewportResize);
+      window.visualViewport?.addEventListener("resize", handleViewportResize);
 
       const unlistenOutput = listen<TerminalOutput>("terminal-output", (event) => {
         if (event.payload.sessionId === sessionIdRef.current) {
@@ -2619,11 +2667,11 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         clearScheduledResize();
         clearPendingSubmitTimer();
         resizeObserver.disconnect();
-        window.removeEventListener("resize", scheduleFitAndResize);
-        document.removeEventListener("fullscreenchange", scheduleFitAndResize);
+        window.removeEventListener("resize", handleViewportResize);
+        document.removeEventListener("fullscreenchange", handleViewportResize);
         document.removeEventListener("focusin", focusInListener);
         document.removeEventListener("focusout", focusOutListener);
-        window.visualViewport?.removeEventListener("resize", scheduleFitAndResize);
+        window.visualViewport?.removeEventListener("resize", handleViewportResize);
         host.removeEventListener("paste", pasteListener, { capture: true });
         terminal.textarea?.removeEventListener("compositionstart", compositionStartListener);
         terminal.textarea?.removeEventListener("compositionend", compositionEndListener);
@@ -2651,7 +2699,8 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       terminal.options.theme = getXtermTheme(appearance);
       terminal.options.fontSize = appearance.fontSize;
       terminal.options.lineHeight = appearance.lineHeight;
-      scheduleFitAndResize();
+      lastFitHostSizeRef.current = null;
+      scheduleFitAndResize({ force: true, settle: true });
     }, [appearance]);
 
     useEffect(() => {
