@@ -1978,6 +1978,87 @@ textarea {
   background: transparent;
 }
 
+.terminal-dialog-log.has-quick-scroll {
+  padding-right: max(clamp(24px, 5vw, 72px), 44px);
+}
+
+.terminal-dialog-quick-scroll {
+  position: absolute;
+  top: 54px;
+  right: 9px;
+  bottom: 18px;
+  z-index: 6;
+  width: 30px;
+  opacity: 0;
+  pointer-events: none;
+  touch-action: none;
+  transition: opacity 120ms ease;
+  user-select: none;
+}
+
+.terminal-session.has-context .terminal-dialog-quick-scroll {
+  top: 68px;
+}
+
+.terminal-dialog-quick-scroll.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.terminal-dialog-quick-scroll-thumb {
+  position: absolute;
+  top: 0;
+  right: 5px;
+  width: 20px;
+  height: var(--dialog-quick-scroll-thumb-height, 52px);
+  min-height: 44px;
+  padding: 0;
+  transform: translateY(var(--dialog-quick-scroll-thumb-offset, 0px));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--terminal-fg, #d8e1e8) 22%, var(--terminal-panel, #0c1118)),
+      color-mix(in srgb, var(--terminal-fg, #d8e1e8) 12%, var(--terminal-bg, #070b10))
+    );
+  border: 1px solid color-mix(in srgb, var(--terminal-fg, #d8e1e8) 24%, transparent);
+  border-radius: 999px;
+  box-shadow:
+    0 8px 18px color-mix(in srgb, var(--terminal-bg, #070b10) 46%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--terminal-fg, #d8e1e8) 16%, transparent);
+  cursor: grab;
+  outline: none;
+  touch-action: none;
+}
+
+.terminal-dialog-quick-scroll-thumb::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 4px;
+  height: 22px;
+  transform: translate(-50%, -50%);
+  background:
+    radial-gradient(circle at 50% 2px, currentColor 1.5px, transparent 2px),
+    radial-gradient(circle at 50% 11px, currentColor 1.5px, transparent 2px),
+    radial-gradient(circle at 50% 20px, currentColor 1.5px, transparent 2px);
+  color: color-mix(in srgb, var(--terminal-fg, #d8e1e8) 64%, transparent);
+}
+
+.terminal-dialog-quick-scroll-thumb:active {
+  cursor: grabbing;
+}
+
+.terminal-dialog-quick-scroll-thumb:focus-visible {
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--terminal-accent, #8ab4ff) 58%, transparent),
+    0 8px 18px color-mix(in srgb, var(--terminal-bg, #070b10) 46%, transparent);
+}
+
+.terminal-session.mode-terminal .terminal-dialog-quick-scroll {
+  display: none;
+}
+
 .terminal-dialog-context {
   position: absolute;
   top: 11px;
@@ -2656,8 +2737,28 @@ textarea {
     padding: 46px 14px 10px;
   }
 
+  .terminal-dialog-log.has-quick-scroll {
+    padding-right: 36px;
+  }
+
   .terminal-session.has-context .terminal-dialog-log {
     padding-top: 54px;
+  }
+
+  .terminal-dialog-quick-scroll {
+    top: 44px;
+    right: 2px;
+    bottom: 8px;
+    width: 32px;
+  }
+
+  .terminal-session.has-context .terminal-dialog-quick-scroll {
+    top: 52px;
+  }
+
+  .terminal-dialog-quick-scroll-thumb {
+    right: 5px;
+    width: 20px;
   }
 
   .terminal-dialog-context {
@@ -2729,6 +2830,17 @@ textarea {
     padding: 8px 8px 6px;
   }
 
+  .shell.mobile-chrome-hidden .terminal-dialog-log.has-quick-scroll,
+  .shell.mobile-chrome-hidden .terminal-session.has-context .terminal-dialog-log.has-quick-scroll {
+    padding-right: 34px;
+  }
+
+  .shell.mobile-chrome-hidden .terminal-dialog-quick-scroll,
+  .shell.mobile-chrome-hidden .terminal-session.has-context .terminal-dialog-quick-scroll {
+    top: 8px;
+    bottom: 6px;
+  }
+
   .shell.mobile-chrome-hidden .terminal-composer {
     padding: 4px 6px 6px;
   }
@@ -2796,8 +2908,21 @@ textarea {
     padding: 44px 16px 10px;
   }
 
+  .terminal-dialog-log.has-quick-scroll {
+    padding-right: 38px;
+  }
+
   .terminal-session.has-context .terminal-dialog-log {
     padding-top: 52px;
+  }
+
+  .terminal-dialog-quick-scroll {
+    top: 42px;
+    bottom: 8px;
+  }
+
+  .terminal-session.has-context .terminal-dialog-quick-scroll {
+    top: 50px;
   }
 
   .terminal-composer {
@@ -2853,8 +2978,22 @@ textarea {
     padding: 32px 10px 6px;
   }
 
+  .terminal-dialog-log.has-quick-scroll {
+    padding-right: 34px;
+  }
+
   .terminal-session.has-context .terminal-dialog-log {
     padding-top: 38px;
+  }
+
+  .terminal-dialog-quick-scroll {
+    top: 30px;
+    right: 1px;
+    bottom: 5px;
+  }
+
+  .terminal-session.has-context .terminal-dialog-quick-scroll {
+    top: 36px;
   }
 
   .terminal-dialog-context {

@@ -73,6 +73,10 @@ interface TerminalTouchScrollState {
   accumulatedDelta: number;
 }
 
+interface DialogQuickScrollDragState {
+  pointerId: number;
+}
+
 interface ConversationLine {
   text: string;
   muted?: boolean;
@@ -238,6 +242,10 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     const sessionIdRef = useRef<string | null>(null);
     const activeProjectIdRef = useRef(activeProjectId);
     const conversationLogRef = useRef<HTMLDivElement | null>(null);
+    const dialogQuickScrollRailRef = useRef<HTMLDivElement | null>(null);
+    const dialogQuickScrollThumbRef = useRef<HTMLButtonElement | null>(null);
+    const dialogQuickScrollDragRef = useRef<DialogQuickScrollDragState | null>(null);
+    const dialogQuickScrollVisibleRef = useRef(false);
     const startingSessionIdRef = useRef<string | null>(null);
     const pendingStartSessionRef = useRef(false);
     const resizeTimerRef = useRef<number | null>(null);
@@ -283,6 +291,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     const [isStarting, setIsStarting] = useState(false);
     const [conversationMessages, setConversationMessages] = useState<ConversationMessage[]>([]);
     const [tuiContextUsage, setTuiContextUsage] = useState<TuiContextUsage | null>(null);
+    const [dialogQuickScrollVisible, setDialogQuickScrollVisible] = useState(false);
     const [viewMode, setViewMode] = useState<TerminalViewMode>(() => {
       try {
         const savedViewMode = localStorage.getItem(terminalViewModeStorageKey);
@@ -1876,6 +1885,93 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       }
     }
 
+    function getDialogQuickScrollMetrics() {
+      const log = conversationLogRef.current;
+      const rail = dialogQuickScrollRailRef.current;
+      if (!log || !rail) return null;
+
+      const maxScroll = Math.max(0, log.scrollHeight - log.clientHeight);
+      const railRect = rail.getBoundingClientRect();
+      const railHeight = Math.max(0, railRect.height);
+      const thumbHeight =
+        maxScroll > 0 && log.scrollHeight > 0
+          ? Math.max(44, Math.min(railHeight, Math.round((log.clientHeight / log.scrollHeight) * railHeight)))
+          : railHeight;
+      const movableHeight = Math.max(0, railHeight - thumbHeight);
+
+      return {
+        log,
+        maxScroll,
+        movableHeight,
+        railTop: railRect.top,
+        thumbHeight,
+      };
+    }
+
+    function syncDialogQuickScroll() {
+      const metrics = getDialogQuickScrollMetrics();
+      const thumb = dialogQuickScrollThumbRef.current;
+      const shouldShow =
+        viewModeRef.current === "dialog" &&
+        Boolean(metrics && metrics.maxScroll > 2 && metrics.movableHeight > 0);
+
+      if (dialogQuickScrollVisibleRef.current !== shouldShow) {
+        dialogQuickScrollVisibleRef.current = shouldShow;
+        setDialogQuickScrollVisible(shouldShow);
+      }
+      if (!metrics || !thumb) return;
+
+      const progress = metrics.maxScroll > 0 ? metrics.log.scrollTop / metrics.maxScroll : 0;
+      const offset = Math.max(0, Math.min(metrics.movableHeight, progress * metrics.movableHeight));
+      thumb.style.setProperty("--dialog-quick-scroll-thumb-height", `${metrics.thumbHeight}px`);
+      thumb.style.setProperty("--dialog-quick-scroll-thumb-offset", `${offset}px`);
+    }
+
+    function scrollDialogQuickToClientY(clientY: number) {
+      const metrics = getDialogQuickScrollMetrics();
+      if (!metrics || metrics.maxScroll <= 0 || metrics.movableHeight <= 0) return;
+
+      const nextThumbTop = Math.max(
+        0,
+        Math.min(metrics.movableHeight, clientY - metrics.railTop - metrics.thumbHeight / 2),
+      );
+      metrics.log.scrollTop = (nextThumbTop / metrics.movableHeight) * metrics.maxScroll;
+      syncDialogQuickScroll();
+    }
+
+    function handleDialogQuickScrollPointerDown(event: PointerEvent, captureElement: HTMLElement | null) {
+      if (event.pointerType === "mouse" && event.button !== 0) return;
+      if (viewModeRef.current !== "dialog") return;
+
+      dialogQuickScrollDragRef.current = { pointerId: event.pointerId };
+      captureElement?.setPointerCapture(event.pointerId);
+      scrollDialogQuickToClientY(event.clientY);
+      event.preventDefault();
+    }
+
+    function handleDialogQuickScrollPointerMove(event: PointerEvent) {
+      const drag = dialogQuickScrollDragRef.current;
+      if (!drag || drag.pointerId !== event.pointerId) return;
+
+      scrollDialogQuickToClientY(event.clientY);
+      event.preventDefault();
+    }
+
+    function stopDialogQuickScrollDrag(event?: PointerEvent) {
+      const drag = dialogQuickScrollDragRef.current;
+      if (!drag) return;
+
+      const captureElements = [dialogQuickScrollThumbRef.current, dialogQuickScrollRailRef.current];
+      if (event) {
+        captureElements.forEach((element) => {
+          if (element?.hasPointerCapture(event.pointerId)) {
+            element.releasePointerCapture(event.pointerId);
+          }
+        });
+      }
+      dialogQuickScrollDragRef.current = null;
+    }
+
     function consumePendingEchoLine(line: string) {
       const normalizedLine = line.trim();
       if (!normalizedLine) return false;
@@ -2572,7 +2668,26 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
       if (!log) return;
 
       log.scrollTop = log.scrollHeight;
+      syncDialogQuickScroll();
     }, [conversationMessages]);
+
+    useEffect(() => {
+      const log = conversationLogRef.current;
+      if (!log) return;
+
+      const sync = () => syncDialogQuickScroll();
+      const frame = window.requestAnimationFrame(sync);
+      log.addEventListener("scroll", sync, { passive: true });
+      window.addEventListener("resize", sync);
+      window.visualViewport?.addEventListener("resize", sync);
+
+      return () => {
+        window.cancelAnimationFrame(frame);
+        log.removeEventListener("scroll", sync);
+        window.removeEventListener("resize", sync);
+        window.visualViewport?.removeEventListener("resize", sync);
+      };
+    }, [isVisible, viewMode, tuiContextUsage]);
 
     useEffect(() => {
       const host = hostRef.current;
@@ -2856,7 +2971,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         ) : null}
         <div className="terminal-dialog-split" aria-hidden={viewMode !== "dialog"}>
           <div
-            className="terminal-dialog-log"
+            className={`terminal-dialog-log ${dialogQuickScrollVisible ? "has-quick-scroll" : ""}`}
             ref={conversationLogRef}
             aria-label="对话记录"
           >
@@ -2867,6 +2982,31 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
                   <div className="terminal-dialog-bubble">{renderConversationText(message)}</div>
                 </div>
               ))}
+          </div>
+          <div
+            className={`terminal-dialog-quick-scroll ${dialogQuickScrollVisible ? "visible" : ""}`}
+            ref={dialogQuickScrollRailRef}
+            aria-hidden={!dialogQuickScrollVisible}
+            onPointerDown={(event) => {
+              if (event.target === event.currentTarget) {
+                handleDialogQuickScrollPointerDown(event.nativeEvent, event.currentTarget);
+              }
+            }}
+            onPointerMove={(event) => handleDialogQuickScrollPointerMove(event.nativeEvent)}
+            onPointerUp={(event) => stopDialogQuickScrollDrag(event.nativeEvent)}
+            onPointerCancel={(event) => stopDialogQuickScrollDrag(event.nativeEvent)}
+          >
+            <button
+              className="terminal-dialog-quick-scroll-thumb"
+              type="button"
+              ref={dialogQuickScrollThumbRef}
+              aria-label="快速拖动对话记录"
+              tabIndex={dialogQuickScrollVisible ? 0 : -1}
+              onPointerDown={(event) => handleDialogQuickScrollPointerDown(event.nativeEvent, event.currentTarget)}
+              onPointerMove={(event) => handleDialogQuickScrollPointerMove(event.nativeEvent)}
+              onPointerUp={(event) => stopDialogQuickScrollDrag(event.nativeEvent)}
+              onPointerCancel={(event) => stopDialogQuickScrollDrag(event.nativeEvent)}
+            />
           </div>
         </div>
         <div
