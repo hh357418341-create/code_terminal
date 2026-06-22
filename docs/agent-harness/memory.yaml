@@ -1,5 +1,5 @@
 schema_version: 1
-updated: "2026-06-20"
+updated: "2026-06-22"
 
 project:
   name: "Code Terminal"
@@ -25,6 +25,11 @@ artifacts:
   server_binary: "src-tauri/target/release/code-terminal-server"
 
 deployment:
+  release_sync_policy:
+    - "After code changes are complete, keep the local git commit, origin/main, and the phone server deployment aligned to the same version whenever deployment is requested or implied."
+    - "A change is not fully server-synced until the public phone server URL serves the latest built dist asset hashes."
+    - "If SSH credentials or server access block deployment, report the exact local commit and public server asset hashes instead of marking the server as synced."
+    - "Never store or print server passwords, tokens, certificates, or .env contents while syncing versions."
   phone_server:
     host: "8.130.142.159"
     public_url: "http://8.130.142.159:8787/"
