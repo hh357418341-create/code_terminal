@@ -18,6 +18,7 @@ commands:
   build_windows_exe: "npm run build"
   build_server: "npm run build:server"
   run_server: "npm run server"
+  local_full_stack_test: "npm run server"
 
 artifacts:
   frontend_dist: "dist/"
@@ -53,6 +54,11 @@ deployment:
     secret_policy: "Never store the root password or CODE_TERMINAL_TOKEN in repo files, commits, harness memory, or final answers."
 
 validation:
+  local_testing:
+    - "When the user asks to start local testing, run the full backend server with npm run server instead of vite preview, because the phone/Web UI needs the Rust event/terminal API routes."
+    - "Default local full-stack URL is http://127.0.0.1:8787/ and does not require a token."
+    - "Do not use vite preview for user acceptance testing unless the user explicitly asks for static frontend-only preview."
+    - "For phone access to the full backend from LAN, non-localhost binding requires CODE_TERMINAL_TOKEN; do not store or print persistent tokens."
   frontend:
     - "npm run build:frontend"
   desktop:
