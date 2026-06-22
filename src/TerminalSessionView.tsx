@@ -67,6 +67,12 @@ type ConversationRole = "user" | "terminal";
 type ConversationMessageKind = "normal" | "tui";
 type TerminalViewMode = "dialog" | "terminal";
 
+interface TerminalTouchScrollState {
+  touchId: number;
+  lastClientY: number;
+  accumulatedDelta: number;
+}
+
 interface ConversationLine {
   text: string;
   muted?: boolean;
@@ -271,6 +277,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     const lastFocusDebugTargetRef = useRef<string | null>(null);
     const lastCursorDebugSignatureRef = useRef<string | null>(null);
     const lastSnapshotDebugSignatureRef = useRef<string | null>(null);
+    const terminalTouchScrollRef = useRef<TerminalTouchScrollState | null>(null);
     const viewModeRef = useRef<TerminalViewMode>("terminal");
     const [session, setSession] = useState<TerminalStarted | null>(null);
     const [isStarting, setIsStarting] = useState(false);
@@ -1772,6 +1779,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     }
 
     function showDialogView() {
+      resetTerminalTouchScroll();
       setViewMode("dialog");
       viewModeRef.current = "dialog";
       rememberTerminalViewMode("dialog");
@@ -1789,6 +1797,7 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
     }
 
     function showTerminalView() {
+      resetTerminalTouchScroll();
       setViewMode("terminal");
       viewModeRef.current = "terminal";
       rememberTerminalViewMode("terminal");
@@ -1806,6 +1815,64 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
         localStorage.setItem(terminalViewModeStorageKey, nextViewMode);
       } catch {
         // Ignore storage failures; the active view still changes for this session.
+      }
+    }
+
+    function getTerminalLinePixelHeight() {
+      return Math.max(8, appearance.fontSize * appearance.lineHeight);
+    }
+
+    function resetTerminalTouchScroll() {
+      terminalTouchScrollRef.current = null;
+    }
+
+    function handleTerminalTouchStart(event: TouchEvent) {
+      if (viewModeRef.current !== "terminal") return;
+      if (event.touches.length !== 1) {
+        resetTerminalTouchScroll();
+        return;
+      }
+
+      const touch = event.touches[0];
+      terminalTouchScrollRef.current = {
+        touchId: touch.identifier,
+        lastClientY: touch.clientY,
+        accumulatedDelta: 0,
+      };
+    }
+
+    function handleTerminalTouchMove(event: TouchEvent) {
+      if (viewModeRef.current !== "terminal") return;
+
+      const scroll = terminalTouchScrollRef.current;
+      const terminal = terminalRef.current;
+      if (!scroll || !terminal) return;
+
+      const touch = Array.from(event.touches).find((item) => item.identifier === scroll.touchId);
+      if (!touch) return;
+
+      const deltaY = scroll.lastClientY - touch.clientY;
+      scroll.lastClientY = touch.clientY;
+      scroll.accumulatedDelta += deltaY;
+      if (event.cancelable) {
+        event.preventDefault();
+      }
+
+      const lineHeight = getTerminalLinePixelHeight();
+      const lines = Math.trunc(scroll.accumulatedDelta / lineHeight);
+      if (lines === 0) return;
+
+      terminal.scrollLines(lines);
+      scroll.accumulatedDelta -= lines * lineHeight;
+    }
+
+    function handleTerminalTouchEnd(event: TouchEvent) {
+      const scroll = terminalTouchScrollRef.current;
+      if (!scroll) return;
+
+      const stillActive = Array.from(event.touches).some((touch) => touch.identifier === scroll.touchId);
+      if (!stillActive) {
+        resetTerminalTouchScroll();
       }
     }
 
@@ -2506,6 +2573,24 @@ export const TerminalSessionView = forwardRef<TerminalSessionHandle, TerminalSes
 
       log.scrollTop = log.scrollHeight;
     }, [conversationMessages]);
+
+    useEffect(() => {
+      const host = hostRef.current;
+      if (!host) return;
+
+      const handleTouchCancel = () => resetTerminalTouchScroll();
+      host.addEventListener("touchstart", handleTerminalTouchStart, { passive: true });
+      host.addEventListener("touchmove", handleTerminalTouchMove, { passive: false });
+      host.addEventListener("touchend", handleTerminalTouchEnd, { passive: true });
+      host.addEventListener("touchcancel", handleTouchCancel, { passive: true });
+
+      return () => {
+        host.removeEventListener("touchstart", handleTerminalTouchStart);
+        host.removeEventListener("touchmove", handleTerminalTouchMove);
+        host.removeEventListener("touchend", handleTerminalTouchEnd);
+        host.removeEventListener("touchcancel", handleTouchCancel);
+      };
+    }, [appearance.fontSize, appearance.lineHeight]);
 
     useEffect(() => {
       onRuntimeChange(tabId, { session, isStarting });

@@ -1874,6 +1874,7 @@ textarea {
   min-height: 0;
   overflow: hidden;
   background: transparent;
+  overscroll-behavior: contain;
 }
 
 .terminal-session.visible {
@@ -1896,6 +1897,9 @@ textarea {
   padding: 58px clamp(18px, 5vw, 72px) 26px;
   overflow-x: hidden;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
   background:
     linear-gradient(
       180deg,
@@ -2131,6 +2135,7 @@ textarea {
   background: transparent;
   opacity: 0.01;
   pointer-events: none;
+  touch-action: pan-y;
   visibility: hidden;
 }
 
@@ -2164,15 +2169,20 @@ textarea {
   height: 100%;
   padding: 42px 15px 15px;
   background: transparent;
+  touch-action: pan-y;
 }
 
 .terminal-host .xterm-screen {
   background: transparent;
+  touch-action: pan-y;
 }
 
 .terminal-host .xterm-viewport {
   background-color: transparent;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
 }
 
 .terminal-host .xterm-viewport::-webkit-scrollbar {
